@@ -44,8 +44,11 @@ def get_connection():
     """Conexion fresca. Usa st.secrets (key-pair) en cloud, connection_name en local."""
     if _USE_SECRETS:
         sf = st.secrets["snowflake"]
-        # Cargar private key desde el PEM almacenado en secrets
-        private_key_pem = sf["private_key"].replace("\\n", "\n").encode("utf-8")
+        # La key puede venir con \n literales o con saltos reales (TOML triple-quote)
+        raw_key = sf["private_key"]
+        if "\\n" in raw_key:
+            raw_key = raw_key.replace("\\n", "\n")
+        private_key_pem = raw_key.strip().encode("utf-8")
         private_key = serialization.load_pem_private_key(private_key_pem, password=None)
         private_key_bytes = private_key.private_bytes(
             encoding=serialization.Encoding.DER,
