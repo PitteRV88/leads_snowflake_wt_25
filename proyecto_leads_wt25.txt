@@ -1,0 +1,526 @@
+=============================================================
+PROYECTO: LEADS SNOWFLAKE WORLD TOUR 2025
+Base de Datos: DB_LEADS_SNOWFLAKE_WT25
+Conexion Snowflake: TXA18114 (account: TDA19796, user: PEDRO_ULLOA)
+Warehouse: COMPUTE_WH | Role: ACCOUNTADMIN
+Fecha inicio: 2026-03-23
+Ultima sesion: 2026-03-25 (sesion 5 - Pitch EGOS BI, deploy cloud, PDF)
+=============================================================
+
+## ARQUITECTURA DE LA BASE DE DATOS
+
+DB_LEADS_SNOWFLAKE_WT25
+  RAW         -> Datos crudos del CSV de ClickUp (landing zone)
+  STAGING     -> Datos limpios, deduplicados y normalizados
+  CORE        -> Modelo dimensional (fuente de verdad)
+  ANALYTICS   -> Vistas de consumo, pitch personalizado, pipeline
+
+## TABLAS CREADAS Y SU ESTADO
+
+### RAW.LEADS_RAW (100 filas)
+- Espejo exacto del CSV original
+- Columnas: NOMBRE, APELLIDOS, EMAIL, EMPRESA, CARGO_CONTEXTO, WHATSAPP, INDUSTRIA, LOADED_AT
+- Stage: RAW.STG_LEADS_CSV (archivo cargado via PUT)
+
+### STAGING.CONTACTOS_STAGING (93 filas - 7 duplicados eliminados)
+- Deduplicados por EMAIL (QUALIFY ROW_NUMBER)
+- Email corregido: jorge.zarate@compsa.com.mxom -> .com.mx
+- Telefonos normalizados (notacion cientifica -> numeros)
+- Nombres con INITCAP
+
+### STAGING.CUENTAS_STAGING (79 empresas unicas)
+- Extraidas de contactos, agrupadas por UPPER(EMPRESA)
+- Incluye conteo de contactos y lista de cargos
+
+### CORE.DIM_INDUSTRIAS (17 registros)
+- ID 1: Sin Clasificar
+- ID 2-17: 16 industrias (Technology, Fintech/Financial Services, Retail/Consumer Goods,
+  Manufacturing/Industrial, Telecommunications, Consulting/Professional Services,
+  Food & Beverage, Education/Research, Automotive, Media/Entertainment, E-commerce,
+  Energy, Government/Public Sector, Healthcare/Pharma, Logistics/Transportation, Insurance)
+
+### CORE.DIM_EJECUTIVOS (1 registro)
+- ID 1: Pedro Ulloa
+
+### CORE.DIM_TERRITORIOS (1 registro)
+- ID 1: Territorio Pedro Ulloa -> Ejecutivo ID 1
+- Descripcion: Leads Snowflake World Tour 2025 - Todas las industrias
+- Soporte para REGION y PAIS (expansion futura)
+
+### CORE.REL_TERRITORIO_INDUSTRIA (15 registros)
+- Territorio 1 vinculado a las 15 industrias activas
+
+### CORE.DIM_CUENTAS (79 filas, 25 columnas)
+- Columnas de datos: ACCT_NAME, INDUSTRIA_ID, TERRITORIO_ID, EJECUTIVO_ID
+- Enriquecimiento demografico: SITIO_WEB, UBICACION, PAIS, ESTADO, CIUDAD,
+  LINKEDIN_EMPRESA, REVENUE_ESTIMADO_USD, NUM_EMPLEADOS_ESTIMADO, TAMANO_EMPRESA
+- Seguimiento comercial: ESTATUS (PENDIENTE/CONTACTADO/EN_SEGUIMIENTO/CALIFICADO/
+  OPORTUNIDAD/DESCARTADO), FECHA_PRIMER_CONTACTO, FECHA_ULTIMO_CONTACTO, NOTAS
+- Metadata: FUENTE_LEAD='SNOWFLAKE_WORLD_TOUR_2025', APOLLO_SEARCHED
+- 79/79 cuentas clasificadas por industria (100%)
+- 50/79 con estimaciones de tamano del LLM, 29 con defaults
+
+### CORE.DIM_CONTACTOS (93 filas, 20 columnas)
+- Datos del evento: PRIMER_NOMBRE, APELLIDO, NOMBRE_COMPLETO, CARGO, EMAIL, WHATSAPP
+- Clasificacion: NIVEL_CARGO (C-Level, Director, Manager, Lead, Architect, etc.)
+- Clasificacion: DEPARTAMENTO (Datos/BI, AI/ML, Ingenieria, Seguridad, etc.)
+- Seguimiento: CONTACTADO (BOOLEAN), FECHA_CONTACTO, METODO_CONTACTO, RESPUESTA
+- FUENTE = 'EVENTO_WT25'
+- 26 con WhatsApp, 93 con email
+
+### CORE.DIM_CASOS_USO (16 registros)
+- Insights generados con Cortex COMPLETE (llama3.1-8b) por industria
+- Columnas: TENDENCIAS_INDUSTRIA, RETOS_PRINCIPALES, CASOS_USO_SNOWFLAKE, PROPUESTA_VALOR
+
+### CORE.FACT_INTERACCIONES (0 filas - lista para uso)
+- Historial de interacciones comerciales
+- Columnas: TIPO, FECHA, DESCRIPCION, RESULTADO, SIGUIENTE_ACCION
+
+## VISTAS ANALYTICS
+
+### ANALYTICS.VW_CUENTAS_CONTACTOS
+- Vista maestra: cuentas + mejor contacto + industria + enriquecimiento
+- Score de enriquecimiento (0-5)
+
+### ANALYTICS.VW_PITCH_PERSONALIZADO
+- Pitch personalizado por cuenta con contexto Snowflake World Tour 2025
+- Campos: SALUDO, APERTURA, CUERPO, CIERRE, FIRMA, PITCH_COMPLETO
+- Incluye CASOS_USO_REFERENCIA y RETOS_REFERENCIA por industria
+
+### ANALYTICS.VW_PIPELINE_COMERCIAL
+- Estado de seguimiento de todos los leads
+- Filtrable por ESTATUS, INDUSTRIA, EJECUTIVO, CONTACTADO
+
+## DISTRIBUCION DE CUENTAS POR INDUSTRIA
+
+Technology:                        16 cuentas
+Fintech/Financial Services:        16 cuentas
+Retail/Consumer Goods:             10 cuentas
+Manufacturing/Industrial:           9 cuentas
+Telecommunications:                 6 cuentas
+Consulting/Professional Services:   5 cuentas
+Food & Beverage:                    4 cuentas
+Education/Research:                 3 cuentas
+Government/Public Sector:           2 cuentas
+Automotive:                         2 cuentas
+Media/Entertainment:                2 cuentas
+E-commerce:                         1 cuenta
+Energy:                             1 cuenta
+Healthcare/Pharma:                  1 cuenta
+Logistics/Transportation:           1 cuenta
+
+TOTAL: 79 cuentas, 93 contactos
+
+## DISTRIBUCION POR TAMANO DE EMPRESA
+
+Enterprise (1000+):    30 cuentas (38.0%)
+Pequena (11-50):       31 cuentas (39.2%) -- incluye 29 defaults
+Grande (251-1000):     13 cuentas (16.5%)
+Mediana (51-250):       5 cuentas (6.3%)
+
+## ESTRUCTURA DE ARCHIVOS DEL PROYECTO
+
+Leads_datos_SnowflakeWT25/
+  .gitignore                             <- Exclusiones para repositorio Git
+  .streamlit/
+    config.toml                          <- Tema visual EGOS BI
+    secrets.toml.example                 <- Plantilla de credenciales (sin datos reales)
+  leads_datos_clickup.csv              <- CSV original de ClickUp
+  proyecto_leads_wt25.txt              <- ESTE ARCHIVO
+  requirements.txt                     <- Dependencias para Streamlit Community Cloud
+  run_dashboard.bat                    <- Launcher del dashboard
+  scripts/
+    sql/
+      01_crear_bd_esquemas.sql         <- DDLs de BD, schemas, stage, tabla RAW
+      02_staging_limpieza.sql          <- Limpieza y deduplicacion a STAGING
+      03_crear_dimensiones.sql         <- DDLs de todas las tablas CORE
+    python/
+      load_csv.py                      <- Script de carga del CSV (PUT + COPY INTO)
+      dashboard_leads_wt25.py          <- Dashboard interactivo Streamlit (1045 lineas, v3 cloud-ready)
+  docs/
+    DEPLOY_STREAMLIT_CLOUD.txt         <- Guia paso a paso para deploy en cloud
+  data/                                <- Datos de entrada/salida
+
+## ROLES Y PERMISOS
+
+- LEADS_DASHBOARD_ROLE: Rol de lectura para dashboard/app
+  - SELECT en todas las tablas CORE
+  - SELECT en todas las vistas ANALYTICS
+  - USAGE en COMPUTE_WH
+  - Asignado a PEDRO_ULLOA
+
+## ESTADO ACTUAL
+
+### COMPLETADO (Sesion 3 - 2026-03-23):
+23. Dashboard v2 (887 lineas) con mejoras UX:
+    a. Nombres de cuenta como botones-link en grid 4 columnas (reemplaza selectbox+boton)
+    b. Click en nombre abre popup @st.dialog con tarjeta completa de cuenta
+    c. Checkbox interactivo "Contactado" en tabla de leads con write-back a Snowflake
+    d. Popup con 6 acciones: marcar contactado, agregar contacto, agregar/editar ubicacion,
+       editar cuenta, registrar interaccion, generar pitch IA + boton enviar email
+    e. Todos los emails como mailto: links en todo el dashboard
+    f. Correccion StreamlitInvalidWidthError (width=0 -> width="stretch")
+    g. Todas las 14 ocurrencias de use_container_width=True -> width="stretch" (Streamlit 1.55)
+24. keyring instalado para cache de MFA token (snowflake-connector-python[secure-local-storage])
+    - connections.toml ya tenia client_store_temporary_credential=true
+    - Faltaba el paquete keyring para que funcione el almacenamiento en Windows Credential Manager
+
+### COMPLETADO (Sesion 2 - 2026-03-23):
+17. Dashboard Streamlit interactivo v1 con CRUD completo (847 lineas)
+18. KPIs, graficas, filtros, detalle de cuenta, gestion de contactos
+19. Pitch personalizado con Cortex AI + siguiente accion sugerida
+20. Write-back a Snowflake (marcar contactado, agregar contacto, editar cuenta, registrar interaccion)
+21. Insights por industria con tabs
+22. run_dashboard.bat launcher
+
+### COMPLETADO (Sesion 1 - 2026-03-23):
+1. BD DB_LEADS_SNOWFLAKE_WT25 creada con 4 esquemas
+2. CSV cargado en RAW (100 filas)
+3. STAGING: 93 contactos unicos, 79 empresas unicas
+4. Modelo dimensional completo en CORE (8 tablas)
+5. Pedro Ulloa como ejecutivo, territorio general creado
+6. 79 cuentas y 93 contactos poblados en CORE
+7. Clasificacion de industria: 79/79 (100%) con Cortex LLM + correcciones manuales
+8. Estimacion de tamano: 50/79 con LLM, 29 con defaults
+9. Ubicacion geografica estimada con Cortex LLM
+10. 16 industrias con casos de uso generados por Cortex AI
+11. Vista de pitch personalizado (seguimiento WT25)
+12. Vista de pipeline comercial
+13. Vista maestra cuentas+contactos
+14. LEADS_DASHBOARD_ROLE creado y asignado
+15. Scripts SQL guardados en scripts/sql/
+16. Documentacion del proyecto
+
+
+## DASHBOARD STREAMLIT INTERACTIVO (Sesion 2 - 2026-03-23)
+
+### Archivo: scripts/python/dashboard_leads_wt25.py (887 lineas, v2)
+### Copia de trabajo: C:\Users\PedroUlloa\dashboard_leads_wt25.py (misma version)
+### Launcher: run_dashboard.bat
+
+### Funcionalidades del Dashboard:
+
+#### Filtros (Sidebar):
+- Estatus comercial (PENDIENTE, CONTACTADO, EN_SEGUIMIENTO, CALIFICADO, OPORTUNIDAD, DESCARTADO)
+- Contactado (Todos / Ya contactados / Pendientes)
+- Industria (multiselect)
+- Tamano empresa (multiselect)
+- Pais (multiselect)
+- Busqueda por nombre de empresa
+
+#### KPIs (7 metricas):
+- Total Cuentas | Contactadas | Pendientes | Con WhatsApp | Con Email | Total Contactos | Interacciones
+
+#### Graficas (5):
+1. Distribucion por Industria (bar horizontal)
+2. Pipeline Comercial por Estatus (bar vertical con colores por estado)
+3. Tamano de Empresa (bar vertical)
+4. Distribucion Geografica - Top 10 (donut chart)
+5. Heatmap: Industria vs Tamano
+
+#### Top 10 Cuentas de Mayor Interes:
+- Score combinado: datos obtenidos (0-5) + tamano empresa (0-5)
+- Grafica de composicion del score
+
+#### Tabla Principal de Leads:
+- Columnas: Empresa, Industria, Tamano, Contacto, Cargo, Email, WhatsApp, Estatus, Contactado, # Contactos, # Interacciones
+
+#### Detalle y Acciones por Cuenta (popup @st.dialog - NUEVO v2):
+- Grid de botones con nombres de cuentas filtradas (4 columnas)
+- Click en cualquier nombre abre popup modal con:
+  - Tarjeta de detalle: industria, tamano, empleados, revenue, ubicacion, web, LinkedIn, notas
+  - Tabla de contactos (emails como mailto: links)
+  - Historial de interacciones
+  - 6 botones de accion (ver abajo)
+  - Generador de pitch IA con boton de envio de email (mailto:)
+
+#### 6 Botones de Accion en Popup (CRUD / write-back a Snowflake):
+1. **Marcar como Contactado**: Seleccionar contacto, metodo, resultado, notas -> UPDATE DIM_CONTACTOS + UPDATE DIM_CUENTAS + INSERT FACT_INTERACCIONES
+2. **Agregar Contacto**: Formulario nombre, apellido, cargo, email, WhatsApp, LinkedIn -> INSERT DIM_CONTACTOS
+3. **Agregar/Editar Ubicacion**: Pais, estado, ciudad -> UPDATE DIM_CUENTAS
+4. **Editar Datos Cuenta**: Todos los campos excepto ACCT_NAME -> UPDATE DIM_CUENTAS
+5. **Registrar Interaccion**: Tipo, descripcion, resultado, siguiente accion -> INSERT FACT_INTERACCIONES
+6. **Generar Pitch IA**: Cortex COMPLETE + boton mailto: para enviar email
+
+#### Checkbox "Contactado" en tabla (NUEVO v2):
+- Checkbox interactivo en st.data_editor con write-back directo
+- Al cambiar checkbox: UPDATE DIM_CONTACTOS + UPDATE DIM_CUENTAS + INSERT FACT_INTERACCIONES
+- Usa marcar_contactado_simple() con conexion fresca (no cacheada)
+
+#### Pitch Personalizado + Siguiente Accion (IA):
+- Generacion de pitch con Cortex COMPLETE (llama3.1-8b)
+- Tono de seguimiento al interes mostrado en WT25
+- Incluye contexto de industria (retos, casos de uso, propuesta)
+- Incluye historial de interacciones previas
+- Siguiente accion sugerida por IA (accionable, 1 oracion)
+- Boton para guardar siguiente accion en historial
+
+#### Insights por Industria (Tabs):
+- Propuesta de valor, tendencias 2025-2026, retos principales, casos de uso Snowflake
+- Conteo de cuentas por industria
+
+### Dependencias:
+- streamlit 1.55.0
+- plotly 6.6.0
+- snowflake-connector-python 4.3.0 [secure-local-storage]
+- keyring 25.7.0 (para cache MFA en Windows Credential Manager)
+- pandas 2.3.3
+
+### Ejecucion:
+- Via run_dashboard.bat (doble click)
+- O: set SNOWFLAKE_CONNECTION_NAME=TXA18114 && streamlit run dashboard_leads_wt25.py --server.port 8501
+- URL: http://localhost:8501
+
+### PENDIENTE INMEDIATO:
+1. Enriquecer sitio web y LinkedIn de empresas (web scraping o Apollo)
+2. Mejorar estimaciones de tamano para las 29 empresas con defaults
+3. Validar/corregir clasificaciones de industria de las empresas menos conocidas
+4. USUARIO NO HA PROBADO dashboard v2 aun - verificar en proxima sesion
+5. Reporte PDF con graficas (documento profesional del proyecto)
+
+### PENDIENTE FUTURO:
+- Reporte PDF con graficas
+- Apollo People Search para enriquecer contactos adicionales
+- Automatizacion de envio de emails/WhatsApp
+- Definir territorios especificos por industria/geografia cuando se sumen mas ejecutivos
+- Registrar interacciones en FACT_INTERACCIONES conforme se avance el seguimiento
+
+## DECISIONES DEL USUARIO
+- BD nueva dedicada (DB_LEADS_SNOWFLAKE_WT25)
+- Todos los leads asignados a Pedro Ulloa inicialmente
+- Territorio unico que cubre todas las industrias (escalable)
+- Estructura preparada para multiples ejecutivos y territorios por industria/geografia
+- Columna de seguimiento comercial (ESTATUS, CONTACTADO, etc.)
+- Pitch como "seguimiento al interes mostrado en Snowflake World Tour 2025"
+- Warehouse: COMPUTE_WH
+- Guardar todos los scripts en los directorios del proyecto
+
+## NOTAS TECNICAS
+- CSV encoding: WINDOWS-1252 (caracteres latinos)
+- 7 contactos duplicados eliminados por EMAIL
+- Email con typo corregido: jorge.zarate@compsa.com.mxom -> .com.mx
+- Telefonos en notacion cientifica (5.23313E+11) convertidos a numeros
+- "Contexto de la empresa" en el CSV es realmente el cargo/rol de la persona
+- "Industria del cliente" estaba vacia en TODAS las filas del CSV
+- Cortex LLM (llama3.1-8b) primera pasada: 59/79 clasificadas, 20 Unknown
+- Segunda pasada con contexto mexicano: 10 Unknown resueltas correctamente
+- 10 restantes clasificadas manualmente (empresas conocidas mal categorizadas por LLM)
+- OneDrive + Write tool: Falla con EEXIST. Usar scripts .py temporales
+- Python -c en cmd.exe: Falla con SyntaxError. Usar archivos .py temporales
+
+## NOTAS SESION 3 (2026-03-23)
+
+### Cambios dashboard v1 -> v2:
+- @st.dialog para popup modal de cuenta (reemplaza expander/seccion inline)
+- st.data_editor con CheckboxColumn para contactado interactivo con write-back
+- st.dataframe con on_select="rerun" y selection_mode="single-row" para Top 10
+- st.column_config.LinkColumn para mailto: links en emails
+- urllib.parse.urlencode para generar mailto: URLs con subject y body
+- make_mailto() y email_link_md() funciones helper
+- Grid de st.button con :link: emoji para nombres de cuenta (4 columnas)
+- Session state para dialog/form toggling dentro del popup
+- st.cache_data.clear() despues de cada write para refrescar datos
+- get_connection() conexion fresca para writes (no cacheada)
+
+### Funciones clave del dashboard (887 lineas):
+- get_connection()                  -> Conexion fresca para writes
+- load_data()                       -> Query principal con CTE best_contact (cached ttl=120)
+- load_contactos_cuenta(cuenta_id)  -> Todos los contactos de una cuenta
+- load_interacciones_cuenta(cta_id) -> Historial interacciones
+- marcar_contactado()               -> Full: UPDATE contactos + UPDATE cuentas + INSERT interaccion
+- marcar_contactado_simple()        -> Simplificado para checkbox (solo boolean flip)
+- agregar_contacto()                -> INSERT DIM_CONTACTOS
+- actualizar_cuenta()               -> UPDATE DIM_CUENTAS (campos dinamicos)
+- registrar_interaccion()           -> INSERT FACT_INTERACCIONES
+- make_mailto(email, subject, body) -> Genera mailto: URL
+- email_link_md(email)              -> Genera markdown mailto link
+- mostrar_tarjeta_cuenta(acct_name) -> @st.dialog con detalle + 6 acciones + pitch IA
+
+### Compatibilidad Streamlit 1.55:
+- width=0 NO valido -> usar width="stretch"
+- use_container_width=True deprecado -> usar width="stretch"
+- @st.dialog requiere Streamlit >= 1.33
+
+### MFA token caching:
+- Requiere: pip install snowflake-connector-python[secure-local-storage]
+- Instala keyring que almacena tokens en Windows Credential Manager
+- connections.toml debe tener: client_store_temporary_credential = true
+- Ubicacion connections.toml: C:\Users\PedroUlloa\.snowflake\connections.toml
+- Primera autenticacion pide MFA, las siguientes reutilizan token cacheado
+
+### Archivos sincronizados:
+- Original de trabajo: C:\Users\PedroUlloa\dashboard_leads_wt25.py (887 lineas)
+- Copia en proyecto:   OneDrive/.../scripts/python/dashboard_leads_wt25.py (sincronizado)
+- Metodo de sync: tmp_sync.py con shutil.copy (workaround OneDrive + Write tool)
+
+### Para retomar en proxima sesion:
+1. Preguntar al usuario si probo el dashboard v2 y si tiene observaciones
+2. Si hay errores, leer C:\Users\PedroUlloa\dashboard_leads_wt25.py y corregir
+3. Pendiente: generar reporte PDF profesional del proyecto
+4. Pendiente: enriquecer datos (web, LinkedIn, tamano empresa)
+5. El dashboard esta corriendo en http://localhost:8501 (si no se cerro la terminal)
+
+## NOTAS SESION 4 (2026-03-24)
+
+### Dashboard v2 -> v3 cambios:
+
+#### 1. Contacto Principal (ES_PRINCIPAL):
+- DDL: ALTER TABLE DIM_CONTACTOS ADD COLUMN ES_PRINCIPAL BOOLEAN DEFAULT FALSE
+- Inicializacion: UPDATE SET ES_PRINCIPAL=TRUE para contactos con RN=1 (79 principales, 14 secundarios)
+- CTE best_contact actualizado: ORDER BY ES_PRINCIPAL DESC primero
+- load_contactos_cuenta() incluye ES_PRINCIPAL, ordena por ES_PRINCIPAL DESC
+- Tag [PRINCIPAL] visible en lista de contactos del dialog
+- Funcion cambiar_contacto_principal(cuenta_id, nuevo_principal_id): resetea todos a FALSE, pone TRUE al nuevo
+- Accion "Cambiar Contacto Principal" en selectbox del dialog
+
+#### 2. Empresa como link clickable (elimina checkboxes y grid de botones):
+- Top 10: st.dataframe con seleccion de fila REEMPLAZADO por tabla con st.columns
+  - Cada fila: columna Empresa es st.button(":link: nombre", key=f"t10_{i}")
+  - Click -> st.session_state["_open_cuenta"] = nombre -> st.rerun()
+- Gestion de Leads: st.dataframe REEMPLAZADO por tabla con st.columns + paginacion
+  - Paginacion: 15 leads por pagina, botones Anterior/Siguiente
+  - Cada fila: columna Empresa es st.button(":link: nombre", key=f"lead_{idx}")
+  - Email como markdown mailto link
+  - Contactado como texto "Si"/"No"
+- Top 5 por Industria: botones-link debajo del grafico de barras
+  - st.columns(len(t5d)) con st.button por cada empresa
+- Grid de 79 botones ELIMINADO completamente
+- Patron session_state unico: todas las secciones escriben a st.session_state["_open_cuenta"]
+  - Un solo punto de invocacion al final del archivo (antes del footer):
+    if "_open_cuenta" in st.session_state and st.session_state["_open_cuenta"]:
+        _cuenta_abrir = st.session_state.pop("_open_cuenta")
+        mostrar_tarjeta_cuenta(_cuenta_abrir)
+  - pop() limpia el state para evitar reabrir en cada rerun
+
+#### 3. Grafico Top 5 cuentas por industria:
+- Seccion nueva entre Gestion de Leads y Insights
+- st.selectbox para elegir industria
+- px.bar horizontal stacked (Datos 0-5 + Tamano 0-5) con nlargest(5)
+- Botones-link debajo del grafico para abrir detalle de cada empresa
+
+#### 4. Quick-action Contactado:
+- st.expander "Marcar / Desmarcar Contactado (rapido)"
+- Dos columnas: marcar (no contactados) y desmarcar (contactados)
+- Selectbox + boton en cada columna
+
+#### 5. Insights con scroll:
+- Contenedores de Tendencias, Retos y Casos de Uso: st.container(border=True, height=350)
+- Altura fija 350px con barra de desplazamiento vertical automatica
+
+#### 6. Pitch personalizado ajustado:
+- Prompt actualizado: NO asume contacto en persona
+- Tono: "Nos da mucho gusto que hayas podido asistir al Snowflake World Tour celebrado el ano pasado,
+  sabemos que en estos momentos tu industria esta enfrentando [reto]..."
+- Sigue con caso de uso Snowflake + propuesta de siguiente paso
+
+#### 7. PDF Fivetran vs AWS Glue:
+- Archivo: OneDrive/.../Fivetran_vs_AWS_Glue_Comparativo.pdf (11 paginas, 12 secciones)
+- Generado con reportlab (pip install en Python312)
+- IMPORTANTE: Se regenero v2 porque v1 contenia informacion FALSA (adquisicion Snowflake-Fivetran)
+- REGLA: NUNCA incluir informacion especulativa o no validada oficialmente en documentos
+
+### Funciones actualizadas/nuevas en dashboard (1019 lineas):
+- cambiar_contacto_principal(cuenta_id, nuevo_id) -> Cambia principal (reset + set)
+- load_contactos_cuenta() -> Ahora incluye ES_PRINCIPAL, ordena por ES_PRINCIPAL DESC
+
+### Archivos:
+- Dashboard: C:\Users\PedroUlloa\dashboard_leads_wt25.py (1019 lineas, v3)
+- Copia OneDrive: sincronizado via tmp_sync.py
+- PDF comparativo: OneDrive/.../Fivetran_vs_AWS_Glue_Comparativo.pdf
+
+### Workaround null bytes:
+- Ediciones multiples pueden introducir null bytes en el archivo
+- Solucion: script tmp_fix_null.py que lee en modo rb, elimina b'\x00', reescribe
+- Siempre verificar sintaxis con py_compile antes de relanzar
+
+### Rutas importantes:
+- streamlit.exe: C:\Users\PedroUlloa\AppData\Local\Python\pythoncore-3.14-64\Scripts\streamlit.exe
+- python.exe (para scripts): C:\Users\PedroUlloa\AppData\Local\Programs\Python\Python312\python.exe
+- Lanzar dashboard: set SNOWFLAKE_CONNECTION_NAME=TXA18114&& streamlit.exe run dashboard_leads_wt25.py --server.port 8501
+
+### Snowflake state:
+- DIM_CONTACTOS: 93 registros, 21 columnas (incluye ES_PRINCIPAL)
+- 79 contactos ES_PRINCIPAL=TRUE, 14 ES_PRINCIPAL=FALSE
+- Todo enriquecimiento previo fue con Cortex AI (llama3.1-8b), NO se uso Apollo.io ni ningun API externo
+
+### Para retomar en proxima sesion:
+1. Dashboard v3 corriendo en http://localhost:8501 (si no se cerro terminal)
+2. Si no corre: set SNOWFLAKE_CONNECTION_NAME=TXA18114&& streamlit run dashboard_leads_wt25.py
+3. Pendiente: enriquecimiento de datos de contactos (opciones: Cortex AI, Apollo.io API, web scraping)
+4. Pendiente: reporte PDF profesional del proyecto completo
+5. Si hay null bytes: correr tmp_fix_null.py antes de relanzar
+6. REGLA: nunca incluir info especulativa/no validada en documentos generados
+
+## NOTAS SESION 5 (2026-03-25)
+
+### Equipo diferente: Cambio de maquina
+- Sesion anterior: C:\Users\PedroUlloa\ (Python 3.14, streamlit en pythoncore-3.14-64)
+- Esta sesion: C:\Users\pedro\ (Python 3.12, streamlit en Python312\Scripts)
+- Copia de trabajo: C:\Users\pedro\dashboard_leads_wt25.py (por problema de paths con espacios de OneDrive)
+- Sincronizacion a OneDrive via tmp_sync.py (shutil.copy2)
+
+### Dashboard v3 -> v3 cloud-ready cambios:
+
+#### 1. Pitch personalizado mejorado (prompt completo reescrito):
+- Se agrego contexto de EGOS BI como consultora: Modern Data Stack, migracion a Snowflake,
+  integracion de datos, transformacion, analytics y Data Cloud
+- Cierre cambiado: ya NO menciona demos, demostraciones ni pruebas de concepto
+- Cierre nuevo: pregunta casual "Que te parece si agendamos una llamada de 20 minutos para rebotar ideas?"
+- Prohibicion: NUNCA usar "potencialidad de Snowflake" ni "potencial de Snowflake"
+- Si se menciona potencial, debe decir "el potencial de tus datos"
+- Enfoque: valor para el cliente, no el producto
+- Caso de uso: combinacion de capacidades de EGOS BI + Snowflake (no solo Snowflake)
+
+#### 2. Prompt de siguiente accion actualizado:
+- Ya NO sugiere demos ni demostraciones
+- Enfocado en: agendar llamadas, enviar emails, compartir contenido
+
+#### 3. Conexion cloud-ready (get_connection):
+- Detecta automaticamente si existe st.secrets["snowflake"]
+- Si existe: usa account/user/password/warehouse/database/role de st.secrets
+- Si no existe: usa connection_name de connections.toml (comportamiento local original)
+- Variable _USE_SECRETS controla el modo
+- Compatible con ambos entornos sin cambiar codigo
+
+#### 4. Artefactos de deploy para Streamlit Community Cloud:
+- requirements.txt: streamlit>=1.55.0, plotly>=6.0.0, snowflake-connector-python>=4.0.0, pandas>=2.0.0
+- .streamlit/config.toml: tema visual EGOS BI (primaryColor=#1B3A5C)
+- .streamlit/secrets.toml.example: plantilla con estructura de credenciales
+- .gitignore: excluye secrets.toml, .csv, __pycache__, archivos temporales
+- docs/DEPLOY_STREAMLIT_CLOUD.txt: guia paso a paso (crear repo GitHub, subir, configurar secrets, deploy)
+
+#### 5. Mailto links (investigacion y decision):
+- Problema: en este equipo, Chrome intercepta el protocolo mailto y abre pestaña blank
+- Causa raiz: New Outlook (UWP/WebView2) no registra correctamente el handler mailto en Windows
+- Se intentaron multiples enfoques: st.link_button, st.html, components.html con JS,
+  os.startfile, webbrowser.open, session_state para persistir pitch
+- Ninguno funciono en este equipo especifico (Chrome + New Outlook UWP)
+- Decision del usuario: REVERTIR todo, dejar mailto como link markdown estandar
+- Funciona correctamente en equipos donde el handler mailto esta bien configurado
+- Es un problema de configuracion local del SO/navegador, no del dashboard
+
+### Archivos creados en sesion 5:
+- .gitignore (29 lineas)
+- .streamlit/config.toml (17 lineas)
+- .streamlit/secrets.toml.example (15 lineas)
+- requirements.txt (11 lineas)
+- docs/DEPLOY_STREAMLIT_CLOUD.txt (118 lineas)
+- scripts/python/dashboard_leads_wt25.py actualizado (1045 lineas, v3 cloud-ready)
+
+### Rutas importantes (equipo actual):
+- streamlit.exe: C:\Users\pedro\AppData\Local\Programs\Python\Python312\Scripts\streamlit.exe
+- python.exe: C:\Users\pedro\AppData\Local\Programs\Python\Python312\python.exe
+- connections.toml: C:\Users\pedro\.snowflake\connections.toml
+- Copia de trabajo: C:\Users\pedro\dashboard_leads_wt25.py
+- Proyecto OneDrive: C:\Users\pedro\OneDrive - EGOS BI\Documentos\Snowflake\Leads_datos_SnowflakeWT25\
+- Lanzar dashboard: set SNOWFLAKE_CONNECTION_NAME=TXA18114&& streamlit.exe run C:\Users\pedro\dashboard_leads_wt25.py --server.port 8501
+
+### Para retomar en proxima sesion:
+1. Dashboard v3 cloud-ready listo para deploy (falta crear repo GitHub y conectar a Streamlit Cloud)
+2. Pendiente: enriquecimiento de datos de contactos (LinkedIn, sitio web, tamano empresa)
+3. Pendiente: generar reporte PDF profesional con paleta EGOS BI
+4. Pendiente: agregar estandar de deployment al marco de trabajo
+5. Pendiente: agregar lecciones aprendidas al marco de trabajo
+6. Si cambia de equipo: ajustar rutas en tmp_sync.py y verificar connections.toml
+7. Mailto links: problema local de configuracion Chrome/Outlook, no del codigo
+

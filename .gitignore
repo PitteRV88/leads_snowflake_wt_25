@@ -1,0 +1,41 @@
+# =============================================================
+# .gitignore
+# Proyecto: Leads Snowflake World Tour 2025 - EGOS BI
+# =============================================================
+
+# Secretos de Streamlit (NUNCA subir credenciales)
+.streamlit/secrets.toml
+
+# Datos locales
+data/
+*.csv
+
+# Cache de Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Archivos temporales
+*.tmp
+tmp_*.py
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Archivos de OneDrive
+*.lnk
+
+# Scripts locales (launchers, busquedas)
+*.bat
+*.ps1
+
+# PDFs sueltos en raiz (no son parte del dashboard)
+/*.pdf
+
+# Reportes generados (PDF, output)
+output/
+
+# Variables de entorno
+.env

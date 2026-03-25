@@ -1,0 +1,10 @@
+# =============================================================
+# requirements.txt
+# Dependencias para Streamlit Community Cloud
+# Proyecto: Leads Snowflake World Tour 2025 - EGOS BI
+# Fecha: 2026-03-25
+# =============================================================
+streamlit>=1.55.0
+plotly>=6.0.0
+snowflake-connector-python>=4.0.0
+pandas>=2.0.0

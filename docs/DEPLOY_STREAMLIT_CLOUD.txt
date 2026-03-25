@@ -1,0 +1,117 @@
+# =============================================================
+# GUIA DE DEPLOY - Streamlit Community Cloud
+# Proyecto: Leads Snowflake World Tour 2025 - EGOS BI
+# Fecha: 2026-03-25
+# =============================================================
+#
+# PREREQUISITOS:
+# 1. Cuenta de GitHub (https://github.com)
+# 2. Cuenta de Streamlit Community Cloud (https://share.streamlit.io)
+#    - Se vincula con GitHub en el primer login
+# 3. Credenciales de Snowflake (account, user, password)
+#
+# =============================================================
+# PASO 1: CREAR REPOSITORIO EN GITHUB
+# =============================================================
+#
+# Opcion A - Via GitHub web:
+#   1. Ir a https://github.com/new
+#   2. Nombre: leads-snowflake-wt25
+#   3. Privado (recomendado, contiene datos de leads)
+#   4. NO inicializar con README (lo subimos nosotros)
+#   5. Crear repositorio
+#
+# Opcion B - Via GitHub CLI (si tienes gh instalado):
+#   gh repo create leads-snowflake-wt25 --private --source=. --push
+#
+# =============================================================
+# PASO 2: SUBIR ARCHIVOS AL REPOSITORIO
+# =============================================================
+#
+# Desde el directorio del proyecto, ejecutar:
+#
+#   cd "C:\Users\pedro\OneDrive - EGOS BI\Documentos\Snowflake\Leads_datos_SnowflakeWT25"
+#   git init
+#   git add .gitignore
+#   git add requirements.txt
+#   git add .streamlit/config.toml
+#   git add .streamlit/secrets.toml.example
+#   git add scripts/python/dashboard_leads_wt25.py
+#   git commit -m "Deploy inicial: Dashboard Leads WT25 - EGOS BI"
+#   git branch -M main
+#   git remote add origin https://github.com/TU_USUARIO/leads-snowflake-wt25.git
+#   git push -u origin main
+#
+# IMPORTANTE: NO subir secrets.toml, .csv, ni datos sensibles
+#
+# =============================================================
+# PASO 3: DEPLOY EN STREAMLIT COMMUNITY CLOUD
+# =============================================================
+#
+# 1. Ir a https://share.streamlit.io
+# 2. Click en "New app"
+# 3. Configurar:
+#    - Repository: TU_USUARIO/leads-snowflake-wt25
+#    - Branch: main
+#    - Main file path: scripts/python/dashboard_leads_wt25.py
+# 4. En "Advanced settings" > "Secrets":
+#    Pegar el contenido de secrets.toml con valores REALES:
+#
+#    [snowflake]
+#    account = "TDA19796"
+#    user = "PEDRO_ULLOA"
+#    password = "TU_PASSWORD_REAL"
+#    warehouse = "COMPUTE_WH"
+#    database = "DB_LEADS_SNOWFLAKE_WT25"
+#    role = "LEADS_DASHBOARD_ROLE"
+#
+# 5. Click en "Deploy!"
+#
+# =============================================================
+# PASO 4: VERIFICAR
+# =============================================================
+#
+# - La app tardara 1-2 minutos en arrancar la primera vez
+# - Verificar que los KPIs muestren datos (79 cuentas, 93 contactos)
+# - Probar filtros, graficas, popup de cuenta
+# - Probar generacion de pitch con Cortex AI
+# - La URL sera: https://TU_USUARIO-leads-snowflake-wt25-scripts-python-dashboard-xxxxx.streamlit.app
+#
+# =============================================================
+# NOTAS DE SEGURIDAD
+# =============================================================
+#
+# - El repositorio DEBE ser privado (contiene nombres de empresas y contactos)
+# - Las credenciales van SOLO en Streamlit Cloud Secrets, NUNCA en el repo
+# - El rol LEADS_DASHBOARD_ROLE tiene permisos limitados (solo SELECT)
+# - Para escribir (marcar contactado, editar cuenta, etc.) el rol necesita
+#   permisos de INSERT/UPDATE en CORE y ANALYTICS
+# - Considerar crear un usuario de servicio dedicado para la app en cloud
+#
+# =============================================================
+# ACTUALIZACIONES
+# =============================================================
+#
+# Para actualizar la app despues del deploy:
+#   1. Editar el archivo localmente
+#   2. git add scripts/python/dashboard_leads_wt25.py
+#   3. git commit -m "Descripcion del cambio"
+#   4. git push
+#   5. Streamlit Community Cloud detecta el push y redeploya automaticamente
+#
+# =============================================================
+# ESTRUCTURA DEL REPOSITORIO
+# =============================================================
+#
+# leads-snowflake-wt25/
+#   .gitignore                          <- Excluye secrets y datos
+#   .streamlit/
+#     config.toml                       <- Tema visual EGOS BI
+#     secrets.toml.example              <- Plantilla de secretos
+#   requirements.txt                    <- Dependencias Python
+#   scripts/
+#     python/
+#       dashboard_leads_wt25.py         <- Dashboard principal (1045 lineas)
+#   docs/
+#     DEPLOY_STREAMLIT_CLOUD.txt        <- ESTE ARCHIVO
+#
