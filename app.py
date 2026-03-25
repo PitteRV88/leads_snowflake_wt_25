@@ -15,6 +15,7 @@ import pandas as pd
 import plotly.express as px
 import snowflake.connector
 from datetime import datetime
+from cryptography.hazmat.primitives import serialization
 
 # -- Configuracion de pagina --
 st.set_page_config(
@@ -40,13 +41,21 @@ except Exception:
 # =============================================================
 
 def get_connection():
-    """Conexion fresca. Usa st.secrets en cloud, connection_name en local."""
+    """Conexion fresca. Usa st.secrets (key-pair) en cloud, connection_name en local."""
     if _USE_SECRETS:
         sf = st.secrets["snowflake"]
+        # Cargar private key desde el PEM almacenado en secrets
+        private_key_pem = sf["private_key"].replace("\\n", "\n").encode("utf-8")
+        private_key = serialization.load_pem_private_key(private_key_pem, password=None)
+        private_key_bytes = private_key.private_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
         return snowflake.connector.connect(
             account=sf["account"],
             user=sf["user"],
-            password=sf["password"],
+            private_key=private_key_bytes,
             warehouse=sf.get("warehouse", "COMPUTE_WH"),
             database=sf.get("database", DB),
             role=sf.get("role", "LEADS_DASHBOARD_ROLE"),
