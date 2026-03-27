@@ -537,7 +537,7 @@ Leads_datos_SnowflakeWT25/
 - Pestana Insights: tabs anidados por industria (propuesta, tendencias, retos, casos uso)
 - Gestion de Leads: siempre visible DEBAJO de las pestanas (no dentro de ninguna)
   - Separada por st.divider()
-  - Incluye tabla paginada, quick-action contactado, y apertura de dialog
+  - Incluye barra de busqueda, tabla paginada, y apertura de dialog
 
 #### 2. Filtro "Medio de Contacto" (reemplaza filtro "Contactado"):
 - Opciones: Todos | Con WhatsApp | Con Email | Con ambos | Sin medio
@@ -566,17 +566,37 @@ Leads_datos_SnowflakeWT25/
 #### 7. Consolidacion de acciones en dialog:
 - Eliminada opcion "Agregar/Editar Ubicacion" del selectbox de acciones
 - La ubicacion ya se puede editar desde "Editar Datos Cuenta"
-- Acciones restantes: Marcar Contactado, Agregar Contacto, Cambiar Contacto Principal,
-  Editar Datos Cuenta, Registrar Interaccion, Generar Pitch IA
+- Eliminados expanders quick-action "Marcar/Desmarcar Contactado" y "Descalificar Lead"
+  de la zona de Gestion de Leads (las acciones estan en el dialog de cada cuenta)
+- Acciones en dialog: Marcar Contactado, Agregar Contacto, Cambiar Contacto Principal,
+  Editar Datos Cuenta, Registrar Interaccion, Generar Pitch IA, Descalificar Lead
 
-### Git:
-- Commit: 4ee6f97 "Dashboard v4: pestanas, wa.me links, filtro medio contacto, busqueda leads"
+#### 8. Estatus DESCALIFICADO con motivo obligatorio:
+- DDL: ALTER TABLE DIM_CUENTAS ADD COLUMN MOTIVO_DESCALIFICACION VARCHAR(500)
+- Nuevo estatus "DESCALIFICADO" en pipeline, editar cuenta y graficos (color #2c3e50)
+- Filtro sidebar: lista fija de 7 estatus, DESCALIFICADO desmarcado por defecto
+  (leads descalificados no aparecen a menos que el usuario active el filtro)
+- Accion "Descalificar Lead" en dialog de detalle:
+  - Si no esta descalificado: muestra estatus actual + text_area motivo obligatorio + boton confirmar
+  - Si ya esta descalificado: muestra warning con motivo y sugiere Editar Datos para reactivar
+- Accion "Editar Datos Cuenta": campo motivo condicional (aparece solo si estatus=DESCALIFICADO)
+  - Validacion: no permite guardar sin motivo si estatus es DESCALIFICADO
+  - Si cambia de estatus: MOTIVO_DESCALIFICACION se limpia a NULL
+- Tarjeta de detalle: st.warning con motivo si ESTATUS=DESCALIFICADO
+
+### Git (sesion 6):
+- 4ee6f97: Dashboard v4: pestanas, wa.me links, filtro medio contacto, busqueda leads
+- f11717a: Documentacion sesion 6: notas dashboard v4, cambios y pendientes
+- fae5f06: Agregar estatus DESCALIFICADO con motivo obligatorio y prefiltrado
+- cbd238e: Fix: estatus DESCALIFICADO siempre visible en sidebar + quick-action descalificar
+- d52abe9: Mover descalificar al dialog de cuenta, eliminar expanders quick-action
 - Push: origin/master actualizado
 - Repo: https://github.com/PitteRV88/leads_snowflake_wt_25.git
 
 ### Archivos modificados en sesion 6:
-- scripts/python/dashboard_leads_wt25.py (1063 lineas, v4)
+- scripts/python/dashboard_leads_wt25.py (1062 lineas, v4)
 - app.py (sincronizado, copia identica del dashboard)
+- proyecto_leads_wt25.txt (este archivo)
 
 ### Workaround OneDrive paths (cmd.exe):
 - cmd.exe no maneja bien paths con espacios para git, py_compile, shutil.copy
@@ -588,11 +608,12 @@ Leads_datos_SnowflakeWT25/
   - tmp_sync_local.py: copia dashboard -> C:\Users\pedro\dashboard_leads_wt25.py
 
 ### Para retomar en proxima sesion:
-1. Dashboard v4 publicado en GitHub, Streamlit Cloud deberia auto-deploy
-2. Pendiente: enriquecimiento de datos de contactos (LinkedIn, sitio web, tamano empresa)
-3. Pendiente: generar reporte PDF profesional con paleta EGOS BI
-4. Pendiente: agregar estandar de deployment al marco de trabajo
-5. Pendiente: agregar lecciones aprendidas al marco de trabajo
-6. Si cambia de equipo: ajustar rutas en tmp_*.py y verificar connections.toml
-7. Lanzar dashboard local: streamlit.exe run C:\Users\pedro\dashboard_leads_wt25.py --server.port 8503
+1. Dashboard v4 publicado en GitHub (d52abe9), Streamlit Cloud deberia auto-deploy
+2. DIM_CUENTAS tiene nueva columna MOTIVO_DESCALIFICACION VARCHAR(500)
+3. Pendiente: enriquecimiento de datos de contactos (LinkedIn, sitio web, tamano empresa)
+4. Pendiente: generar reporte PDF profesional con paleta EGOS BI
+5. Pendiente: agregar estandar de deployment al marco de trabajo
+6. Pendiente: agregar lecciones aprendidas al marco de trabajo
+7. Si cambia de equipo: ajustar rutas en tmp_*.py y verificar connections.toml
+8. Lanzar dashboard local: streamlit.exe run C:\Users\pedro\dashboard_leads_wt25.py --server.port 8503
 
