@@ -697,7 +697,7 @@ df, df_casos = load_data()
 
 with st.sidebar:
     st.header("Filtros")
-    estatus_opts = sorted(df["ESTATUS"].dropna().unique())
+    estatus_opts = ["PENDIENTE", "CONTACTADO", "EN_SEGUIMIENTO", "CALIFICADO", "OPORTUNIDAD", "DESCARTADO", "DESCALIFICADO"]
     default_estatus = [e for e in estatus_opts if e != "DESCALIFICADO"]
     sel_estatus = st.multiselect("Estatus Comercial", estatus_opts, default=default_estatus)
     medio_opts = ["Todos", "Con WhatsApp", "Con Email", "Con ambos", "Sin medio"]
@@ -1058,6 +1058,29 @@ with st.expander("Marcar / Desmarcar Contactado (rapido)"):
                     st.toast(f"Desmarcado: {sel_desmarcar}")
                     st.cache_data.clear()
                     st.rerun()
+
+# Quick-action: Descalificar lead
+with st.expander("Descalificar Lead"):
+    cuentas_activas = df_leads[df_leads["ESTATUS"] != "DESCALIFICADO"]
+    if not cuentas_activas.empty:
+        opts_descal = dict(zip(
+            cuentas_activas["ACCT_NAME"] + " (" + cuentas_activas["ESTATUS"].fillna("") + ")",
+            cuentas_activas["CUENTA_ID"]
+        ))
+        sel_descal = st.selectbox("Selecciona cuenta a descalificar:", list(opts_descal.keys()), key="qa_descal_sel")
+        motivo_rapido = st.text_input("Motivo de descalificacion:", placeholder="Ej: No responde, no tiene presupuesto, empresa cerro...", key="qa_descal_motivo")
+        if st.button("Descalificar", key="qa_descal_btn", type="primary"):
+            if not motivo_rapido.strip():
+                st.error("Debes indicar el motivo de descalificacion.")
+            else:
+                cu_id = int(opts_descal[sel_descal])
+                campos = {"ESTATUS": "DESCALIFICADO", "MOTIVO_DESCALIFICACION": motivo_rapido.strip()}
+                if actualizar_cuenta(cu_id, campos):
+                    st.toast(f"Descalificado: {sel_descal}")
+                    st.cache_data.clear()
+                    st.rerun()
+    else:
+        st.info("No hay cuentas activas para descalificar.")
 
 # =============================================================
 # APERTURA UNICA DEL DIALOG (evita duplicados)
