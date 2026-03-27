@@ -446,7 +446,8 @@ def mostrar_tarjeta_cuenta(acct_name):
         "Cambiar Contacto Principal",
         "Editar Datos Cuenta",
         "Registrar Interaccion",
-        "Generar Pitch con IA"
+        "Generar Pitch con IA",
+        "Descalificar Lead"
     ], key=f"action_{cuenta_id}")
 
     # ---- MARCAR COMO CONTACTADO ----
@@ -683,6 +684,26 @@ def mostrar_tarjeta_cuenta(acct_name):
 
                 except Exception as e:
                     st.error(f"Error al generar pitch: {e}")
+
+    # ---- DESCALIFICAR LEAD ----
+    elif action == "Descalificar Lead":
+        if row["ESTATUS"] == "DESCALIFICADO":
+            st.warning(f"Esta cuenta ya esta descalificada. Motivo: {row.get('MOTIVO_DESCALIFICACION') or 'Sin motivo registrado'}")
+            st.caption("Para reactivarla, usa 'Editar Datos Cuenta' y cambia el estatus.")
+        else:
+            st.caption(f"Estatus actual: **{row['ESTATUS']}**")
+            motivo_descal_dialog = st.text_area("Motivo de descalificacion (obligatorio):",
+                placeholder="Ej: No responde, no tiene presupuesto, empresa cerro, no es perfil Snowflake...",
+                key=f"descal_motivo_{cuenta_id}")
+            if st.button("Confirmar Descalificacion", key=f"descal_btn_{cuenta_id}", type="primary"):
+                if not motivo_descal_dialog.strip():
+                    st.error("Debes indicar el motivo de descalificacion.")
+                else:
+                    campos = {"ESTATUS": "DESCALIFICADO", "MOTIVO_DESCALIFICACION": motivo_descal_dialog.strip()}
+                    if actualizar_cuenta(cuenta_id, campos):
+                        st.success(f"Lead descalificado: {acct_name}")
+                        st.cache_data.clear()
+                        st.rerun()
 
 
 # =============================================================
@@ -1023,64 +1044,6 @@ with st.container(border=True):
         rc[6].write(rw["ESTATUS"] or "")
         contactado_txt = "Si" if rw["CONTACTADO"] else "No"
         rc[7].write(contactado_txt)
-
-# Quick-action: Marcar/desmarcar contactado
-with st.expander("Marcar / Desmarcar Contactado (rapido)"):
-    cuentas_no_contactadas = df_leads[df_leads["CONTACTADO"] == False]
-    cuentas_contactadas = df_leads[df_leads["CONTACTADO"] == True]
-
-    qa1, qa2 = st.columns(2)
-    with qa1:
-        if not cuentas_no_contactadas.empty:
-            st.markdown("**Marcar como contactado:**")
-            opts_marcar = dict(zip(
-                cuentas_no_contactadas["ACCT_NAME"] + " - " + cuentas_no_contactadas["CONTACTO_NOMBRE"].fillna("Sin contacto"),
-                zip(cuentas_no_contactadas["CONTACTO_ID"], cuentas_no_contactadas["CUENTA_ID"])
-            ))
-            sel_marcar = st.selectbox("Cuenta:", list(opts_marcar.keys()), key="qa_marcar_sel")
-            if st.button("Marcar Contactado", key="qa_marcar_btn", type="primary"):
-                c_id, cu_id = opts_marcar[sel_marcar]
-                if c_id and marcar_contactado_simple(int(c_id), int(cu_id), True):
-                    st.toast(f"Contactado: {sel_marcar}")
-                    st.cache_data.clear()
-                    st.rerun()
-    with qa2:
-        if not cuentas_contactadas.empty:
-            st.markdown("**Desmarcar contactado:**")
-            opts_desmarcar = dict(zip(
-                cuentas_contactadas["ACCT_NAME"] + " - " + cuentas_contactadas["CONTACTO_NOMBRE"].fillna("Sin contacto"),
-                zip(cuentas_contactadas["CONTACTO_ID"], cuentas_contactadas["CUENTA_ID"])
-            ))
-            sel_desmarcar = st.selectbox("Cuenta:", list(opts_desmarcar.keys()), key="qa_desmarcar_sel")
-            if st.button("Desmarcar", key="qa_desmarcar_btn"):
-                c_id, cu_id = opts_desmarcar[sel_desmarcar]
-                if c_id and marcar_contactado_simple(int(c_id), int(cu_id), False):
-                    st.toast(f"Desmarcado: {sel_desmarcar}")
-                    st.cache_data.clear()
-                    st.rerun()
-
-# Quick-action: Descalificar lead
-with st.expander("Descalificar Lead"):
-    cuentas_activas = df_leads[df_leads["ESTATUS"] != "DESCALIFICADO"]
-    if not cuentas_activas.empty:
-        opts_descal = dict(zip(
-            cuentas_activas["ACCT_NAME"] + " (" + cuentas_activas["ESTATUS"].fillna("") + ")",
-            cuentas_activas["CUENTA_ID"]
-        ))
-        sel_descal = st.selectbox("Selecciona cuenta a descalificar:", list(opts_descal.keys()), key="qa_descal_sel")
-        motivo_rapido = st.text_input("Motivo de descalificacion:", placeholder="Ej: No responde, no tiene presupuesto, empresa cerro...", key="qa_descal_motivo")
-        if st.button("Descalificar", key="qa_descal_btn", type="primary"):
-            if not motivo_rapido.strip():
-                st.error("Debes indicar el motivo de descalificacion.")
-            else:
-                cu_id = int(opts_descal[sel_descal])
-                campos = {"ESTATUS": "DESCALIFICADO", "MOTIVO_DESCALIFICACION": motivo_rapido.strip()}
-                if actualizar_cuenta(cu_id, campos):
-                    st.toast(f"Descalificado: {sel_descal}")
-                    st.cache_data.clear()
-                    st.rerun()
-    else:
-        st.info("No hay cuentas activas para descalificar.")
 
 # =============================================================
 # APERTURA UNICA DEL DIALOG (evita duplicados)
