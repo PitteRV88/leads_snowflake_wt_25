@@ -93,7 +93,7 @@ def load_data():
             c.TAMANO_EMPRESA, c.NUM_EMPLEADOS_ESTIMADO, c.REVENUE_ESTIMADO_USD,
             c.UBICACION, c.PAIS, c.ESTADO, c.CIUDAD,
             c.SITIO_WEB, c.LINKEDIN_EMPRESA,
-            c.ESTATUS, c.EJECUTIVO_ID,
+            c.ESTATUS, c.MOTIVO_DESCALIFICACION, c.EJECUTIVO_ID,
             c.FECHA_PRIMER_CONTACTO, c.FECHA_ULTIMO_CONTACTO,
             c.NOTAS, c.FUENTE_CLASIFICACION, c.FUENTE_TAMANO, c.FUENTE_LEAD,
             bc.CONTACTO_ID, bc.NOMBRE_COMPLETO AS CONTACTO_NOMBRE,
@@ -390,6 +390,8 @@ def mostrar_tarjeta_cuenta(acct_name):
 
     dc5, dc6, dc7, dc8 = st.columns(4)
     dc5.metric("Estatus", row["ESTATUS"])
+    if row["ESTATUS"] == "DESCALIFICADO" and row.get("MOTIVO_DESCALIFICACION"):
+        st.warning(f"**Motivo de descalificacion:** {row['MOTIVO_DESCALIFICACION']}")
     dc6.markdown(f"**Ubicacion:** {row['UBICACION'] or 'N/A'}")
     if row["SITIO_WEB"] and str(row["SITIO_WEB"]).strip():
         dc7.markdown(f"**Web:** [{row['SITIO_WEB']}]({row['SITIO_WEB']})")
@@ -512,13 +514,18 @@ def mostrar_tarjeta_cuenta(acct_name):
     # ---- EDITAR DATOS CUENTA ----
     elif action == "Editar Datos Cuenta":
         st.caption(f"Empresa: **{acct_name}** (no editable)")
-        estatus_opts = ["PENDIENTE", "CONTACTADO", "EN_SEGUIMIENTO", "CALIFICADO", "OPORTUNIDAD", "DESCARTADO"]
+        estatus_opts = ["PENDIENTE", "CONTACTADO", "EN_SEGUIMIENTO", "CALIFICADO", "OPORTUNIDAD", "DESCARTADO", "DESCALIFICADO"]
         tamano_opts = ["Micro", "Pequena", "Mediana", "Grande", "Enterprise"]
         ec1, ec2 = st.columns(2)
         nuevo_estatus = ec1.selectbox("Estatus", estatus_opts,
             index=estatus_opts.index(row["ESTATUS"]) if row["ESTATUS"] in estatus_opts else 0, key=f"ed_est_{cuenta_id}")
         nuevo_tamano = ec2.selectbox("Tamano", tamano_opts,
             index=tamano_opts.index(row["TAMANO_EMPRESA"]) if row["TAMANO_EMPRESA"] in tamano_opts else 0, key=f"ed_tam_{cuenta_id}")
+        motivo_descal = ""
+        if nuevo_estatus == "DESCALIFICADO":
+            motivo_descal = st.text_area("Motivo de descalificacion (obligatorio)",
+                value=row.get("MOTIVO_DESCALIFICACION") or "", key=f"ed_mdesc_{cuenta_id}",
+                placeholder="Describe brevemente por que se descalifica este lead...")
         eg1, eg2, eg3 = st.columns(3)
         nuevo_pais = eg1.text_input("Pais", value=row["PAIS"] or "", key=f"ed_pai_{cuenta_id}")
         nuevo_estado = eg2.text_input("Estado", value=row["ESTADO"] or "", key=f"ed_est2_{cuenta_id}")
@@ -531,19 +538,23 @@ def mostrar_tarjeta_cuenta(acct_name):
         nuevo_revenue = en2.number_input("Revenue Est. (USD)", value=float(row["REVENUE_ESTIMADO_USD"]) if row["REVENUE_ESTIMADO_USD"] else 0.0, min_value=0.0, format="%.2f", key=f"ed_rev_{cuenta_id}")
         nuevas_notas = st.text_area("Notas", value=row["NOTAS"] or "", key=f"ed_not_{cuenta_id}")
         if st.button("Guardar Cambios", key=f"ed_save_{cuenta_id}", type="primary"):
-            ubicacion = ", ".join(filter(None, [nuevo_ciudad, nuevo_estado, nuevo_pais]))
-            campos = {
-                "ESTATUS": nuevo_estatus, "TAMANO_EMPRESA": nuevo_tamano,
-                "PAIS": nuevo_pais, "ESTADO": nuevo_estado, "CIUDAD": nuevo_ciudad,
-                "UBICACION": ubicacion, "SITIO_WEB": nuevo_web, "LINKEDIN_EMPRESA": nuevo_linkedin,
-                "NUM_EMPLEADOS_ESTIMADO": nuevo_empleados if nuevo_empleados > 0 else None,
-                "REVENUE_ESTIMADO_USD": nuevo_revenue if nuevo_revenue > 0 else None,
-                "NOTAS": nuevas_notas, "FUENTE_TAMANO": "MANUAL"
-            }
-            if actualizar_cuenta(cuenta_id, campos):
-                st.success("Datos actualizados.")
-                st.cache_data.clear()
-                st.rerun()
+            if nuevo_estatus == "DESCALIFICADO" and not motivo_descal.strip():
+                st.error("Debes indicar el motivo de descalificacion.")
+            else:
+                ubicacion = ", ".join(filter(None, [nuevo_ciudad, nuevo_estado, nuevo_pais]))
+                campos = {
+                    "ESTATUS": nuevo_estatus, "TAMANO_EMPRESA": nuevo_tamano,
+                    "MOTIVO_DESCALIFICACION": motivo_descal.strip() if nuevo_estatus == "DESCALIFICADO" else None,
+                    "PAIS": nuevo_pais, "ESTADO": nuevo_estado, "CIUDAD": nuevo_ciudad,
+                    "UBICACION": ubicacion, "SITIO_WEB": nuevo_web, "LINKEDIN_EMPRESA": nuevo_linkedin,
+                    "NUM_EMPLEADOS_ESTIMADO": nuevo_empleados if nuevo_empleados > 0 else None,
+                    "REVENUE_ESTIMADO_USD": nuevo_revenue if nuevo_revenue > 0 else None,
+                    "NOTAS": nuevas_notas, "FUENTE_TAMANO": "MANUAL"
+                }
+                if actualizar_cuenta(cuenta_id, campos):
+                    st.success("Datos actualizados.")
+                    st.cache_data.clear()
+                    st.rerun()
 
     # ---- REGISTRAR INTERACCION ----
     elif action == "Registrar Interaccion":
@@ -687,7 +698,8 @@ df, df_casos = load_data()
 with st.sidebar:
     st.header("Filtros")
     estatus_opts = sorted(df["ESTATUS"].dropna().unique())
-    sel_estatus = st.multiselect("Estatus Comercial", estatus_opts, default=estatus_opts)
+    default_estatus = [e for e in estatus_opts if e != "DESCALIFICADO"]
+    sel_estatus = st.multiselect("Estatus Comercial", estatus_opts, default=default_estatus)
     medio_opts = ["Todos", "Con WhatsApp", "Con Email", "Con ambos", "Sin medio"]
     sel_medio = st.selectbox("Medio de Contacto", medio_opts)
     industrias = sorted(df["INDUSTRIA_NOMBRE"].unique())
@@ -786,11 +798,12 @@ with tab_graficas:
     with col2:
         with st.container(border=True):
             st.subheader("Pipeline Comercial")
-            status_order = ["PENDIENTE", "CONTACTADO", "EN_SEGUIMIENTO", "CALIFICADO", "OPORTUNIDAD", "DESCARTADO"]
+            status_order = ["PENDIENTE", "CONTACTADO", "EN_SEGUIMIENTO", "CALIFICADO", "OPORTUNIDAD", "DESCARTADO", "DESCALIFICADO"]
             status_counts = dff["ESTATUS"].value_counts().reindex(status_order).dropna().reset_index()
             status_counts.columns = ["Estatus", "Cuentas"]
             colors_map = {"PENDIENTE": "#95a5a6", "CONTACTADO": "#3498db", "EN_SEGUIMIENTO": "#f39c12",
-                          "CALIFICADO": "#2ecc71", "OPORTUNIDAD": "#9b59b6", "DESCARTADO": "#e74c3c"}
+                          "CALIFICADO": "#2ecc71", "OPORTUNIDAD": "#9b59b6", "DESCARTADO": "#e74c3c",
+                          "DESCALIFICADO": "#2c3e50"}
             fig_pipe = px.bar(status_counts, x="Estatus", y="Cuentas", text="Cuentas",
                               color="Estatus", color_discrete_map=colors_map)
             fig_pipe.update_layout(showlegend=False, height=400, margin=dict(l=0, r=0, t=10, b=0))
