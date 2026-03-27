@@ -4,7 +4,7 @@ Base de Datos: DB_LEADS_SNOWFLAKE_WT25
 Conexion Snowflake: TXA18114 (account: TDA19796, user: PEDRO_ULLOA)
 Warehouse: COMPUTE_WH | Role: ACCOUNTADMIN
 Fecha inicio: 2026-03-23
-Ultima sesion: 2026-03-25 (sesion 5 - Pitch EGOS BI, deploy cloud, PDF)
+Ultima sesion: 2026-03-27 (sesion 6 - Dashboard v4: pestanas, wa.me, filtro medio contacto)
 =============================================================
 
 ## ARQUITECTURA DE LA BASE DE DATOS
@@ -136,7 +136,7 @@ Leads_datos_SnowflakeWT25/
       03_crear_dimensiones.sql         <- DDLs de todas las tablas CORE
     python/
       load_csv.py                      <- Script de carga del CSV (PUT + COPY INTO)
-      dashboard_leads_wt25.py          <- Dashboard interactivo Streamlit (1045 lineas, v3 cloud-ready)
+      dashboard_leads_wt25.py          <- Dashboard interactivo Streamlit (1063 lineas, v4 pestanas + wa.me)
   docs/
     DEPLOY_STREAMLIT_CLOUD.txt         <- Guia paso a paso para deploy en cloud
   data/                                <- Datos de entrada/salida
@@ -523,4 +523,76 @@ Leads_datos_SnowflakeWT25/
 5. Pendiente: agregar lecciones aprendidas al marco de trabajo
 6. Si cambia de equipo: ajustar rutas en tmp_sync.py y verificar connections.toml
 7. Mailto links: problema local de configuracion Chrome/Outlook, no del codigo
+
+## NOTAS SESION 6 (2026-03-27)
+
+### Dashboard v3 cloud-ready -> v4 pestanas + wa.me:
+
+#### 1. Reestructura de layout con 4 pestanas:
+- Reemplaza layout de 2 pestanas (Graficas / Gestion de Leads) por 4 pestanas:
+  tab_graficas, tab_top10, tab_top5, tab_insights = st.tabs(["Graficas", "Top 10 Cuentas", "Top 5 por Industria", "Insights"])
+- Pestana Graficas: 4 graficos (Industria, Pipeline, Tamano, Geografia) - SIN heatmap
+- Pestana Top 10: tabla + grafico composicion score
+- Pestana Top 5 por Industria: selector + barras + links a detalle
+- Pestana Insights: tabs anidados por industria (propuesta, tendencias, retos, casos uso)
+- Gestion de Leads: siempre visible DEBAJO de las pestanas (no dentro de ninguna)
+  - Separada por st.divider()
+  - Incluye tabla paginada, quick-action contactado, y apertura de dialog
+
+#### 2. Filtro "Medio de Contacto" (reemplaza filtro "Contactado"):
+- Opciones: Todos | Con WhatsApp | Con Email | Con ambos | Sin medio
+- Filtra por existencia de CONTACTO_WHATSAPP y/o CONTACTO_EMAIL
+- El filtro "Contactado" era redundante con "Estatus comercial" y fue eliminado
+
+#### 3. Links wa.me para WhatsApp:
+- Nueva funcion whatsapp_link_md(numero): genera markdown [numero](https://wa.me/limpio)
+- Limpia numero: elimina +, espacios, guiones
+- Usado en dialog de contactos: WA: [+5215551234567](https://wa.me/5215551234567)
+- Usado en tabla de Gestion de Leads: columna WhatsApp con links clickables
+
+#### 4. Columna WhatsApp en tabla de Gestion de Leads:
+- Columnas actualizadas: Empresa | Industria | Tamano | Contacto | Email | WhatsApp | Estatus | Cont.
+- Proporciones: [2, 1.2, 0.9, 1.3, 1.3, 1.3, 0.9, 0.7]
+
+#### 5. Barra de busqueda en Gestion de Leads:
+- st.text_input("Buscar empresa o contacto:") en la parte superior de la seccion
+- Filtra por ACCT_NAME o CONTACTO_NOMBRE (case-insensitive, coincidencia parcial)
+- La paginacion se recalcula sobre los resultados filtrados
+
+#### 6. Heatmap eliminado:
+- Grafico heatmap (Industria vs Tamano) removido del tab de Graficas
+- Reducido de 5 a 4 graficos
+
+#### 7. Consolidacion de acciones en dialog:
+- Eliminada opcion "Agregar/Editar Ubicacion" del selectbox de acciones
+- La ubicacion ya se puede editar desde "Editar Datos Cuenta"
+- Acciones restantes: Marcar Contactado, Agregar Contacto, Cambiar Contacto Principal,
+  Editar Datos Cuenta, Registrar Interaccion, Generar Pitch IA
+
+### Git:
+- Commit: 4ee6f97 "Dashboard v4: pestanas, wa.me links, filtro medio contacto, busqueda leads"
+- Push: origin/master actualizado
+- Repo: https://github.com/PitteRV88/leads_snowflake_wt_25.git
+
+### Archivos modificados en sesion 6:
+- scripts/python/dashboard_leads_wt25.py (1063 lineas, v4)
+- app.py (sincronizado, copia identica del dashboard)
+
+### Workaround OneDrive paths (cmd.exe):
+- cmd.exe no maneja bien paths con espacios para git, py_compile, shutil.copy
+- Solucion: scripts helper en C:\Users\pedro\:
+  - tmp_git.py: ejecuta git con subprocess y cwd=REPO
+  - tmp_git_commit.py: commit con mensaje multilinea
+  - tmp_check_syntax.py: py_compile del dashboard
+  - tmp_sync_app.py: copia dashboard -> app.py
+  - tmp_sync_local.py: copia dashboard -> C:\Users\pedro\dashboard_leads_wt25.py
+
+### Para retomar en proxima sesion:
+1. Dashboard v4 publicado en GitHub, Streamlit Cloud deberia auto-deploy
+2. Pendiente: enriquecimiento de datos de contactos (LinkedIn, sitio web, tamano empresa)
+3. Pendiente: generar reporte PDF profesional con paleta EGOS BI
+4. Pendiente: agregar estandar de deployment al marco de trabajo
+5. Pendiente: agregar lecciones aprendidas al marco de trabajo
+6. Si cambia de equipo: ajustar rutas en tmp_*.py y verificar connections.toml
+7. Lanzar dashboard local: streamlit.exe run C:\Users\pedro\dashboard_leads_wt25.py --server.port 8503
 
