@@ -1,10 +1,10 @@
 # =============================================================
-# dashboard_leads_wt25.py  (v3 - cloud-ready)
+# dashboard_leads_wt25.py  (v4 - pestanas + wa.me)
 # Dashboard interactivo para gestion de Leads del Snowflake World Tour 2025
 # Incluye: KPIs, graficas, gestion de contactos, pitch IA, pipeline comercial
-# v3: tarjeta popup, checkbox contactado, mailto links, pitch EGOS BI + Snowflake
+# v4: pestanas Graficas/Leads, filtro medio contacto, wa.me links, sin heatmap
 # Compatible: Local (connection_name) y Streamlit Community Cloud (st.secrets)
-# Creado: 2026-03-23 | Actualizado: 2026-03-25 | Conexion: TXA18114
+# Creado: 2026-03-23 | Actualizado: 2026-03-27 | Conexion: TXA18114
 # Proyecto: Leads Snowflake WT25 - EGOS BI
 # =============================================================
 
@@ -357,6 +357,15 @@ def email_link_md(email):
     return f"[{e}](mailto:{e})"
 
 
+def whatsapp_link_md(numero):
+    """Retorna markdown con link wa.me para abrir WhatsApp."""
+    if not numero or not str(numero).strip():
+        return ""
+    raw = str(numero).strip()
+    limpio = raw.replace("+", "").replace(" ", "").replace("-", "")
+    return f"[{raw}](https://wa.me/{limpio})"
+
+
 # =============================================================
 # DIALOG: TARJETA DE DETALLE DE CUENTA (popup)
 # =============================================================
@@ -405,10 +414,10 @@ def mostrar_tarjeta_cuenta(acct_name):
         for _, ct in df_contactos.iterrows():
             contactado_icon = "Si" if ct["CONTACTADO"] else "No"
             email_md = email_link_md(ct["EMAIL"])
-            wa = ct["WHATSAPP"] or ""
+            wa_md = whatsapp_link_md(ct["WHATSAPP"])
             principal_tag = " **[PRINCIPAL]**" if ct.get("ES_PRINCIPAL", False) else ""
             st.markdown(
-                f"- **{ct['NOMBRE_COMPLETO']}**{principal_tag} | {ct['CARGO'] or 'N/A'} | {email_md} | WA: {wa} | Contactado: {contactado_icon}"
+                f"- **{ct['NOMBRE_COMPLETO']}**{principal_tag} | {ct['CARGO'] or 'N/A'} | {email_md} | WA: {wa_md or 'N/A'} | Contactado: {contactado_icon}"
             )
     else:
         st.warning("Sin contactos registrados.")
@@ -433,7 +442,6 @@ def mostrar_tarjeta_cuenta(acct_name):
         "Marcar como Contactado",
         "Agregar Contacto",
         "Cambiar Contacto Principal",
-        "Agregar/Editar Ubicacion",
         "Editar Datos Cuenta",
         "Registrar Interaccion",
         "Generar Pitch con IA"
@@ -479,7 +487,7 @@ def mostrar_tarjeta_cuenta(acct_name):
                     st.cache_data.clear()
                     st.rerun()
 
-    # ---- AGREGAR/EDITAR UBICACION ----
+    # ---- CAMBIAR CONTACTO PRINCIPAL ----
     elif action == "Cambiar Contacto Principal":
         df_ct_p = load_contactos_cuenta(cuenta_id)
         if df_ct_p.empty or len(df_ct_p) < 2:
@@ -500,21 +508,6 @@ def mostrar_tarjeta_cuenta(acct_name):
                     st.success(f"Contacto principal cambiado a {sel_nuevo}.")
                     st.cache_data.clear()
                     st.rerun()
-
-    # ---- AGREGAR/EDITAR UBICACION ----
-    elif action == "Agregar/Editar Ubicacion":
-        st.caption("Actualiza la ubicacion geografica de la cuenta.")
-        eg1, eg2, eg3 = st.columns(3)
-        nuevo_pais = eg1.text_input("Pais", value=row["PAIS"] or "", key=f"ub_pai_{cuenta_id}")
-        nuevo_estado = eg2.text_input("Estado", value=row["ESTADO"] or "", key=f"ub_est_{cuenta_id}")
-        nuevo_ciudad = eg3.text_input("Ciudad", value=row["CIUDAD"] or "", key=f"ub_ciu_{cuenta_id}")
-        if st.button("Guardar Ubicacion", key=f"ub_save_{cuenta_id}", type="primary"):
-            ubicacion = ", ".join(filter(None, [nuevo_ciudad, nuevo_estado, nuevo_pais]))
-            campos = {"PAIS": nuevo_pais, "ESTADO": nuevo_estado, "CIUDAD": nuevo_ciudad, "UBICACION": ubicacion}
-            if actualizar_cuenta(cuenta_id, campos):
-                st.success("Ubicacion actualizada.")
-                st.cache_data.clear()
-                st.rerun()
 
     # ---- EDITAR DATOS CUENTA ----
     elif action == "Editar Datos Cuenta":
@@ -695,7 +688,8 @@ with st.sidebar:
     st.header("Filtros")
     estatus_opts = sorted(df["ESTATUS"].dropna().unique())
     sel_estatus = st.multiselect("Estatus Comercial", estatus_opts, default=estatus_opts)
-    sel_contactado = st.selectbox("Contactado", ["Todos", "Ya contactados", "Pendientes"])
+    medio_opts = ["Todos", "Con WhatsApp", "Con Email", "Con ambos", "Sin medio"]
+    sel_medio = st.selectbox("Medio de Contacto", medio_opts)
     industrias = sorted(df["INDUSTRIA_NOMBRE"].unique())
     sel_industrias = st.multiselect("Industria", industrias, default=industrias)
     tamanos = ["Micro", "Pequena", "Mediana", "Grande", "Enterprise"]
@@ -713,10 +707,20 @@ dff = dff[dff["INDUSTRIA_NOMBRE"].isin(sel_industrias)]
 dff = dff[dff["TAMANO_EMPRESA"].isin(sel_tamanos) | dff["TAMANO_EMPRESA"].isna()]
 dff = dff[dff["PAIS"].isin(sel_paises) | dff["PAIS"].isna()]
 
-if sel_contactado == "Ya contactados":
-    dff = dff[dff["CONTACTADO"] == True]
-elif sel_contactado == "Pendientes":
-    dff = dff[(dff["CONTACTADO"] == False) | (dff["CONTACTADO"].isna())]
+if sel_medio == "Con WhatsApp":
+    dff = dff[dff["CONTACTO_WHATSAPP"].notna() & (dff["CONTACTO_WHATSAPP"].astype(str).str.strip() != "")]
+elif sel_medio == "Con Email":
+    dff = dff[dff["CONTACTO_EMAIL"].notna() & (dff["CONTACTO_EMAIL"].astype(str).str.strip() != "")]
+elif sel_medio == "Con ambos":
+    dff = dff[
+        (dff["CONTACTO_WHATSAPP"].notna() & (dff["CONTACTO_WHATSAPP"].astype(str).str.strip() != "")) &
+        (dff["CONTACTO_EMAIL"].notna() & (dff["CONTACTO_EMAIL"].astype(str).str.strip() != ""))
+    ]
+elif sel_medio == "Sin medio":
+    dff = dff[
+        (dff["CONTACTO_WHATSAPP"].isna() | (dff["CONTACTO_WHATSAPP"].astype(str).str.strip() == "")) &
+        (dff["CONTACTO_EMAIL"].isna() | (dff["CONTACTO_EMAIL"].astype(str).str.strip() == ""))
+    ]
 
 if buscar:
     dff = dff[dff["ACCT_NAME"].str.contains(buscar, case=False, na=False)]
@@ -746,85 +750,8 @@ k6.metric("Total Contactos", total_contactos)
 k7.metric("Interacciones", total_interacciones)
 
 # =============================================================
-# GRAFICAS
+# CALCULAR SCORES (necesario para ambas pestanas)
 # =============================================================
-
-col1, col2 = st.columns(2)
-
-with col1:
-    with st.container(border=True):
-        st.subheader("Distribucion por Industria")
-        ind_counts = dff["INDUSTRIA_NOMBRE"].value_counts().reset_index()
-        ind_counts.columns = ["Industria", "Cuentas"]
-        fig_ind = px.bar(ind_counts, x="Cuentas", y="Industria", orientation="h",
-                         color="Industria", text="Cuentas",
-                         color_discrete_sequence=px.colors.qualitative.Set2)
-        fig_ind.update_layout(showlegend=False, height=400, margin=dict(l=0, r=0, t=10, b=0))
-        fig_ind.update_traces(textposition="outside")
-        st.plotly_chart(fig_ind, width="stretch")
-
-with col2:
-    with st.container(border=True):
-        st.subheader("Pipeline Comercial")
-        status_order = ["PENDIENTE", "CONTACTADO", "EN_SEGUIMIENTO", "CALIFICADO", "OPORTUNIDAD", "DESCARTADO"]
-        status_counts = dff["ESTATUS"].value_counts().reindex(status_order).dropna().reset_index()
-        status_counts.columns = ["Estatus", "Cuentas"]
-        colors_map = {"PENDIENTE": "#95a5a6", "CONTACTADO": "#3498db", "EN_SEGUIMIENTO": "#f39c12",
-                      "CALIFICADO": "#2ecc71", "OPORTUNIDAD": "#9b59b6", "DESCARTADO": "#e74c3c"}
-        fig_pipe = px.bar(status_counts, x="Estatus", y="Cuentas", text="Cuentas",
-                          color="Estatus", color_discrete_map=colors_map)
-        fig_pipe.update_layout(showlegend=False, height=400, margin=dict(l=0, r=0, t=10, b=0))
-        fig_pipe.update_traces(textposition="outside")
-        st.plotly_chart(fig_pipe, width="stretch")
-
-col3, col4 = st.columns(2)
-
-with col3:
-    with st.container(border=True):
-        st.subheader("Tamano de Empresa")
-        tamano_order = ["Micro", "Pequena", "Mediana", "Grande", "Enterprise"]
-        tam_counts = dff["TAMANO_EMPRESA"].value_counts().reindex(tamano_order).dropna().reset_index()
-        tam_counts.columns = ["Tamano", "Cuentas"]
-        fig_tam = px.bar(tam_counts, x="Tamano", y="Cuentas", text="Cuentas",
-                         color="Tamano", color_discrete_sequence=px.colors.sequential.Viridis)
-        fig_tam.update_layout(showlegend=False, height=350, margin=dict(l=0, r=0, t=10, b=0))
-        fig_tam.update_traces(textposition="outside")
-        st.plotly_chart(fig_tam, width="stretch")
-
-with col4:
-    with st.container(border=True):
-        st.subheader("Distribucion Geografica (Top 10)")
-        geo = dff["PAIS"].dropna().value_counts().head(10).reset_index()
-        geo.columns = ["Pais", "Cuentas"]
-        fig_geo = px.pie(geo, values="Cuentas", names="Pais",
-                         color_discrete_sequence=px.colors.qualitative.Set3, hole=0.35)
-        fig_geo.update_layout(height=350, margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(fig_geo, width="stretch")
-
-# Heatmap
-with st.container(border=True):
-    st.subheader("Heatmap: Industria vs Tamano")
-    tamano_ord = ["Micro", "Pequena", "Mediana", "Grande", "Enterprise"]
-    df_heat = dff[dff["TAMANO_EMPRESA"].notna()].groupby(
-        ["INDUSTRIA_NOMBRE", "TAMANO_EMPRESA"]).size().reset_index(name="Cuentas")
-    if not df_heat.empty:
-        df_pivot = df_heat.pivot(index="INDUSTRIA_NOMBRE", columns="TAMANO_EMPRESA", values="Cuentas").fillna(0)
-        df_pivot = df_pivot.reindex(columns=[t for t in tamano_ord if t in df_pivot.columns])
-        fig_heat = px.imshow(
-            df_pivot.values, x=df_pivot.columns.tolist(), y=df_pivot.index.tolist(),
-            color_continuous_scale="Viridis", text_auto=True,
-            labels=dict(x="Tamano", y="Industria", color="Cuentas"), aspect="auto"
-        )
-        fig_heat.update_layout(height=400, margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(fig_heat, width="stretch")
-
-# =============================================================
-# TOP 10 CUENTAS DE INTERES (con click para abrir tarjeta)
-# =============================================================
-
-st.divider()
-st.subheader("Top 10 Cuentas de Mayor Interes")
-st.caption("Score combinado: datos obtenidos (0-5) + tamano empresa (0-5) | Click en una fila para ver detalle")
 
 tamano_score = {"Micro": 1, "Pequena": 2, "Mediana": 3, "Grande": 4, "Enterprise": 5}
 enriq_cols = ["SITIO_WEB", "UBICACION", "CONTACTO_NOMBRE", "LINKEDIN_EMPRESA", "CONTACTO_CARGO"]
@@ -832,59 +759,203 @@ df_sc = dff.copy()
 df_sc["ENRIQ"] = df_sc[enriq_cols].apply(lambda r: sum(1 for v in r if v and str(v).strip()), axis=1)
 df_sc["TAM_SC"] = df_sc["TAMANO_EMPRESA"].map(tamano_score).fillna(0).astype(int)
 df_sc["SCORE"] = df_sc["ENRIQ"] + df_sc["TAM_SC"]
-top10 = df_sc.nlargest(10, ["SCORE", "TAM_SC", "ENRIQ"])
-
-ct1, ct2 = st.columns([2, 1])
-with ct1:
-    with st.container(border=True):
-        t10d = top10[["ACCT_NAME", "INDUSTRIA_NOMBRE", "TAMANO_EMPRESA",
-                       "ENRIQ", "TAM_SC", "SCORE", "CONTACTO_NOMBRE", "ESTATUS"]].copy()
-        t10d.columns = ["Empresa", "Industria", "Tamano", "Datos (0-5)", "Tamano (0-5)",
-                        "Score", "Contacto", "Estatus"]
-        t10d = t10d.fillna("")
-        # Header
-        hc = st.columns([2.5, 1.5, 1, 0.8, 0.8, 0.7, 1.5, 1.2])
-        headers = ["Empresa", "Industria", "Tamano", "Datos", "Tam.", "Score", "Contacto", "Estatus"]
-        for col, h in zip(hc, headers):
-            col.markdown(f"**{h}**")
-        # Filas con empresa como link
-        for i, (_, row) in enumerate(t10d.iterrows()):
-            rc = st.columns([2.5, 1.5, 1, 0.8, 0.8, 0.7, 1.5, 1.2])
-            with rc[0]:
-                if st.button(f":link: {row['Empresa']}", key=f"t10_{i}", use_container_width=True):
-                    st.session_state["_open_cuenta"] = row["Empresa"]
-                    st.rerun()
-            rc[1].write(row["Industria"])
-            rc[2].write(row["Tamano"])
-            rc[3].write(str(row["Datos (0-5)"]))
-            rc[4].write(str(row["Tamano (0-5)"]))
-            rc[5].write(str(row["Score"]))
-            rc[6].write(row["Contacto"])
-            rc[7].write(row["Estatus"])
-
-with ct2:
-    with st.container(border=True):
-        st.markdown("**Composicion del Score**")
-        fig_sc = px.bar(t10d, y="Empresa", x=["Datos (0-5)", "Tamano (0-5)"],
-                        orientation="h", barmode="stack",
-                        color_discrete_sequence=["#3498db", "#2ecc71"])
-        fig_sc.update_layout(height=400, margin=dict(l=0, r=0, t=10, b=0),
-                             yaxis=dict(autorange="reversed"), legend=dict(orientation="h", y=-0.15))
-        st.plotly_chart(fig_sc, width="stretch")
 
 # =============================================================
-# GESTION DE LEADS: tabla con empresa como link clickable
+# PESTANAS: GRAFICAS | TOP 10 | TOP 5 INDUSTRIA | INSIGHTS
+# =============================================================
+
+tab_graficas, tab_top10, tab_top5, tab_insights = st.tabs(["Graficas", "Top 10 Cuentas", "Top 5 por Industria", "Insights"])
+
+# -- TAB GRAFICAS --
+with tab_graficas:
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        with st.container(border=True):
+            st.subheader("Distribucion por Industria")
+            ind_counts = dff["INDUSTRIA_NOMBRE"].value_counts().reset_index()
+            ind_counts.columns = ["Industria", "Cuentas"]
+            fig_ind = px.bar(ind_counts, x="Cuentas", y="Industria", orientation="h",
+                             color="Industria", text="Cuentas",
+                             color_discrete_sequence=px.colors.qualitative.Set2)
+            fig_ind.update_layout(showlegend=False, height=400, margin=dict(l=0, r=0, t=10, b=0))
+            fig_ind.update_traces(textposition="outside")
+            st.plotly_chart(fig_ind, width="stretch")
+
+    with col2:
+        with st.container(border=True):
+            st.subheader("Pipeline Comercial")
+            status_order = ["PENDIENTE", "CONTACTADO", "EN_SEGUIMIENTO", "CALIFICADO", "OPORTUNIDAD", "DESCARTADO"]
+            status_counts = dff["ESTATUS"].value_counts().reindex(status_order).dropna().reset_index()
+            status_counts.columns = ["Estatus", "Cuentas"]
+            colors_map = {"PENDIENTE": "#95a5a6", "CONTACTADO": "#3498db", "EN_SEGUIMIENTO": "#f39c12",
+                          "CALIFICADO": "#2ecc71", "OPORTUNIDAD": "#9b59b6", "DESCARTADO": "#e74c3c"}
+            fig_pipe = px.bar(status_counts, x="Estatus", y="Cuentas", text="Cuentas",
+                              color="Estatus", color_discrete_map=colors_map)
+            fig_pipe.update_layout(showlegend=False, height=400, margin=dict(l=0, r=0, t=10, b=0))
+            fig_pipe.update_traces(textposition="outside")
+            st.plotly_chart(fig_pipe, width="stretch")
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+        with st.container(border=True):
+            st.subheader("Tamano de Empresa")
+            tamano_order = ["Micro", "Pequena", "Mediana", "Grande", "Enterprise"]
+            tam_counts = dff["TAMANO_EMPRESA"].value_counts().reindex(tamano_order).dropna().reset_index()
+            tam_counts.columns = ["Tamano", "Cuentas"]
+            fig_tam = px.bar(tam_counts, x="Tamano", y="Cuentas", text="Cuentas",
+                             color="Tamano", color_discrete_sequence=px.colors.sequential.Viridis)
+            fig_tam.update_layout(showlegend=False, height=350, margin=dict(l=0, r=0, t=10, b=0))
+            fig_tam.update_traces(textposition="outside")
+            st.plotly_chart(fig_tam, width="stretch")
+
+    with col4:
+        with st.container(border=True):
+            st.subheader("Distribucion Geografica (Top 10)")
+            geo = dff["PAIS"].dropna().value_counts().head(10).reset_index()
+            geo.columns = ["Pais", "Cuentas"]
+            fig_geo = px.pie(geo, values="Cuentas", names="Pais",
+                             color_discrete_sequence=px.colors.qualitative.Set3, hole=0.35)
+            fig_geo.update_layout(height=350, margin=dict(l=0, r=0, t=10, b=0))
+            st.plotly_chart(fig_geo, width="stretch")
+
+# -- TAB TOP 10 --
+with tab_top10:
+
+    st.subheader("Top 10 Cuentas de Mayor Interes")
+    st.caption("Score combinado: datos obtenidos (0-5) + tamano empresa (0-5) | Click en una fila para ver detalle")
+
+    top10 = df_sc.nlargest(10, ["SCORE", "TAM_SC", "ENRIQ"])
+
+    ct1, ct2 = st.columns([2, 1])
+    with ct1:
+        with st.container(border=True):
+            t10d = top10[["ACCT_NAME", "INDUSTRIA_NOMBRE", "TAMANO_EMPRESA",
+                           "ENRIQ", "TAM_SC", "SCORE", "CONTACTO_NOMBRE", "ESTATUS"]].copy()
+            t10d.columns = ["Empresa", "Industria", "Tamano", "Datos (0-5)", "Tamano (0-5)",
+                            "Score", "Contacto", "Estatus"]
+            t10d = t10d.fillna("")
+            # Header
+            hc = st.columns([2.5, 1.5, 1, 0.8, 0.8, 0.7, 1.5, 1.2])
+            headers = ["Empresa", "Industria", "Tamano", "Datos", "Tam.", "Score", "Contacto", "Estatus"]
+            for col, h in zip(hc, headers):
+                col.markdown(f"**{h}**")
+            # Filas con empresa como link
+            for i, (_, rw) in enumerate(t10d.iterrows()):
+                rc = st.columns([2.5, 1.5, 1, 0.8, 0.8, 0.7, 1.5, 1.2])
+                with rc[0]:
+                    if st.button(f":link: {rw['Empresa']}", key=f"t10_{i}", use_container_width=True):
+                        st.session_state["_open_cuenta"] = rw["Empresa"]
+                        st.rerun()
+                rc[1].write(rw["Industria"])
+                rc[2].write(rw["Tamano"])
+                rc[3].write(str(rw["Datos (0-5)"]))
+                rc[4].write(str(rw["Tamano (0-5)"]))
+                rc[5].write(str(rw["Score"]))
+                rc[6].write(rw["Contacto"])
+                rc[7].write(rw["Estatus"])
+
+    with ct2:
+        with st.container(border=True):
+            st.markdown("**Composicion del Score**")
+            fig_sc = px.bar(t10d, y="Empresa", x=["Datos (0-5)", "Tamano (0-5)"],
+                            orientation="h", barmode="stack",
+                            color_discrete_sequence=["#3498db", "#2ecc71"])
+            fig_sc.update_layout(height=400, margin=dict(l=0, r=0, t=10, b=0),
+                                 yaxis=dict(autorange="reversed"), legend=dict(orientation="h", y=-0.15))
+            st.plotly_chart(fig_sc, width="stretch")
+
+# -- TAB TOP 5 POR INDUSTRIA --
+with tab_top5:
+
+    st.subheader("Top 5 Cuentas por Industria")
+    st.caption("Score combinado: datos obtenidos (0-5) + tamano empresa (0-5)")
+
+    industrias_disponibles = sorted(dff["INDUSTRIA_NOMBRE"].unique())
+    ti1, ti2 = st.columns([1, 2])
+    with ti1:
+        sel_industria_top5 = st.selectbox("Selecciona industria:", industrias_disponibles, key="sel_ind_top5")
+    with ti2:
+        df_ind = df_sc[df_sc["INDUSTRIA_NOMBRE"] == sel_industria_top5].nlargest(5, ["SCORE", "TAM_SC", "ENRIQ"])
+        if not df_ind.empty:
+            t5d = df_ind[["ACCT_NAME", "TAMANO_EMPRESA", "ENRIQ", "TAM_SC", "SCORE", "CONTACTO_NOMBRE", "ESTATUS"]].copy()
+            t5d.columns = ["Empresa", "Tamano", "Datos (0-5)", "Tamano (0-5)", "Score", "Contacto", "Estatus"]
+            t5d = t5d.fillna("")
+            with st.container(border=True):
+                fig_t5 = px.bar(t5d, y="Empresa", x=["Datos (0-5)", "Tamano (0-5)"],
+                                orientation="h", barmode="stack",
+                                color_discrete_sequence=["#3498db", "#2ecc71"],
+                                title=f"Top 5 - {sel_industria_top5}")
+                fig_t5.update_layout(height=300, margin=dict(l=0, r=0, t=30, b=0),
+                                     yaxis=dict(autorange="reversed"),
+                                     legend=dict(orientation="h", y=-0.2))
+                st.plotly_chart(fig_t5, width="stretch")
+                # Links a detalle de cada empresa
+                t5_cols = st.columns(len(t5d))
+                for j, (_, r5) in enumerate(t5d.iterrows()):
+                    with t5_cols[j]:
+                        if st.button(f":link: {r5['Empresa']}", key=f"t5ind_{j}", use_container_width=True):
+                            st.session_state["_open_cuenta"] = r5["Empresa"]
+                            st.rerun()
+        else:
+            st.info("No hay cuentas en esta industria con los filtros actuales.")
+
+# -- TAB INSIGHTS --
+with tab_insights:
+
+    st.subheader("Insights por Industria: Casos de Uso Snowflake")
+    st.caption("Tendencias, retos y oportunidades generadas con Cortex AI")
+
+    industrias_ci = sorted(df_casos["INDUSTRIA_NOMBRE"].unique())
+    if industrias_ci:
+        tabs_insights = st.tabs(industrias_ci)
+        for tab_ins, industria in zip(tabs_insights, industrias_ci):
+            with tab_ins:
+                caso = df_casos[df_casos["INDUSTRIA_NOMBRE"] == industria].iloc[0]
+                n_cuentas = len(dff[dff["INDUSTRIA_NOMBRE"] == industria])
+                st.caption(f"{n_cuentas} cuentas en esta industria")
+                with st.container(border=True):
+                    st.markdown("**Propuesta de Valor**")
+                    st.info(str(caso["PROPUESTA_VALOR"])[:1000])
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    with st.container(border=True, height=350):
+                        st.markdown("**Tendencias 2025-2026**")
+                        st.write(str(caso["TENDENCIAS_INDUSTRIA"])[:1500])
+                with c2:
+                    with st.container(border=True, height=350):
+                        st.markdown("**Retos Principales**")
+                        st.write(str(caso["RETOS_PRINCIPALES"])[:1500])
+                with c3:
+                    with st.container(border=True, height=350):
+                        st.markdown("**Casos de Uso Snowflake**")
+                        st.write(str(caso["CASOS_USO_SNOWFLAKE"])[:1500])
+
+# =============================================================
+# GESTION DE LEADS (siempre visible, debajo de las pestanas)
 # =============================================================
 
 st.divider()
 st.subheader("Gestion de Leads")
 st.caption("Click en el nombre de la empresa para ver detalle | Usa la seccion inferior para marcar contactado")
 
+# Barra de busqueda de empresa / lead
+busqueda_lead = st.text_input("Buscar empresa o contacto:", placeholder="Escribe para filtrar...", key="busqueda_lead")
+
 # Preparar DataFrame para display
 df_leads = dff[["CUENTA_ID", "CONTACTO_ID", "ACCT_NAME", "INDUSTRIA_NOMBRE", "TAMANO_EMPRESA",
                  "CONTACTO_NOMBRE", "CONTACTO_CARGO", "CONTACTO_EMAIL", "CONTACTO_WHATSAPP",
                  "ESTATUS", "CONTACTADO", "NUM_CONTACTOS", "NUM_INTERACCIONES"]].copy()
 df_leads["CONTACTADO"] = df_leads["CONTACTADO"].fillna(False).astype(bool)
+
+if busqueda_lead and busqueda_lead.strip():
+    _q = busqueda_lead.strip().lower()
+    df_leads = df_leads[
+        df_leads["ACCT_NAME"].fillna("").str.lower().str.contains(_q, regex=False) |
+        df_leads["CONTACTO_NOMBRE"].fillna("").str.lower().str.contains(_q, regex=False)
+    ]
 
 # Paginacion para no renderizar 79 filas de botones
 LEADS_PER_PAGE = 15
@@ -912,27 +983,32 @@ df_page = df_leads.iloc[start_idx:end_idx]
 
 with st.container(border=True):
     # Header
-    lhc = st.columns([2.2, 1.3, 1, 1.5, 1.2, 1.5, 1, 0.8])
-    for col, h in zip(lhc, ["Empresa", "Industria", "Tamano", "Contacto", "Cargo", "Email", "Estatus", "Cont."]):
+    lhc = st.columns([2, 1.2, 0.9, 1.3, 1.3, 1.3, 0.9, 0.7])
+    for col, h in zip(lhc, ["Empresa", "Industria", "Tamano", "Contacto", "Email", "WhatsApp", "Estatus", "Cont."]):
         col.markdown(f"**{h}**")
     # Filas
-    for i, (_, row) in enumerate(df_page.iterrows()):
-        rc = st.columns([2.2, 1.3, 1, 1.5, 1.2, 1.5, 1, 0.8])
+    for i, (_, rw) in enumerate(df_page.iterrows()):
+        rc = st.columns([2, 1.2, 0.9, 1.3, 1.3, 1.3, 0.9, 0.7])
         with rc[0]:
-            if st.button(f":link: {row['ACCT_NAME']}", key=f"lead_{start_idx + i}", use_container_width=True):
-                st.session_state["_open_cuenta"] = row["ACCT_NAME"]
+            if st.button(f":link: {rw['ACCT_NAME']}", key=f"lead_{start_idx + i}", use_container_width=True):
+                st.session_state["_open_cuenta"] = rw["ACCT_NAME"]
                 st.rerun()
-        rc[1].write(row["INDUSTRIA_NOMBRE"] or "")
-        rc[2].write(row["TAMANO_EMPRESA"] or "")
-        rc[3].write(row["CONTACTO_NOMBRE"] or "")
-        rc[4].write(row["CONTACTO_CARGO"] or "")
-        email_val = row["CONTACTO_EMAIL"]
+        rc[1].write(rw["INDUSTRIA_NOMBRE"] or "")
+        rc[2].write(rw["TAMANO_EMPRESA"] or "")
+        rc[3].write(rw["CONTACTO_NOMBRE"] or "")
+        email_val = rw["CONTACTO_EMAIL"]
         if email_val and str(email_val).strip():
-            rc[5].markdown(f"[{str(email_val).strip()}](mailto:{str(email_val).strip()})")
+            rc[4].markdown(f"[{str(email_val).strip()}](mailto:{str(email_val).strip()})")
+        else:
+            rc[4].write("")
+        wa_val = rw["CONTACTO_WHATSAPP"]
+        if wa_val and str(wa_val).strip():
+            wa_limpio = str(wa_val).strip().replace("+", "").replace(" ", "").replace("-", "")
+            rc[5].markdown(f"[{str(wa_val).strip()}](https://wa.me/{wa_limpio})")
         else:
             rc[5].write("")
-        rc[6].write(row["ESTATUS"] or "")
-        contactado_txt = "Si" if row["CONTACTADO"] else "No"
+        rc[6].write(rw["ESTATUS"] or "")
+        contactado_txt = "Si" if rw["CONTACTADO"] else "No"
         rc[7].write(contactado_txt)
 
 # Quick-action: Marcar/desmarcar contactado
@@ -971,76 +1047,6 @@ with st.expander("Marcar / Desmarcar Contactado (rapido)"):
                     st.rerun()
 
 # =============================================================
-# TOP 5 CUENTAS POR INDUSTRIA (grafico dinamico)
-# =============================================================
-
-st.divider()
-st.subheader("Top 5 Cuentas por Industria")
-st.caption("Score combinado: datos obtenidos (0-5) + tamano empresa (0-5)")
-
-industrias_disponibles = sorted(dff["INDUSTRIA_NOMBRE"].unique())
-ti1, ti2 = st.columns([1, 2])
-with ti1:
-    sel_industria_top5 = st.selectbox("Selecciona industria:", industrias_disponibles, key="sel_ind_top5")
-with ti2:
-    df_ind = df_sc[df_sc["INDUSTRIA_NOMBRE"] == sel_industria_top5].nlargest(5, ["SCORE", "TAM_SC", "ENRIQ"])
-    if not df_ind.empty:
-        t5d = df_ind[["ACCT_NAME", "TAMANO_EMPRESA", "ENRIQ", "TAM_SC", "SCORE", "CONTACTO_NOMBRE", "ESTATUS"]].copy()
-        t5d.columns = ["Empresa", "Tamano", "Datos (0-5)", "Tamano (0-5)", "Score", "Contacto", "Estatus"]
-        t5d = t5d.fillna("")
-        with st.container(border=True):
-            fig_t5 = px.bar(t5d, y="Empresa", x=["Datos (0-5)", "Tamano (0-5)"],
-                            orientation="h", barmode="stack",
-                            color_discrete_sequence=["#3498db", "#2ecc71"],
-                            title=f"Top 5 - {sel_industria_top5}")
-            fig_t5.update_layout(height=300, margin=dict(l=0, r=0, t=30, b=0),
-                                 yaxis=dict(autorange="reversed"),
-                                 legend=dict(orientation="h", y=-0.2))
-            st.plotly_chart(fig_t5, width="stretch")
-            # Links a detalle de cada empresa
-            t5_cols = st.columns(len(t5d))
-            for j, (_, r5) in enumerate(t5d.iterrows()):
-                with t5_cols[j]:
-                    if st.button(f":link: {r5['Empresa']}", key=f"t5ind_{j}", use_container_width=True):
-                        st.session_state["_open_cuenta"] = r5["Empresa"]
-                        st.rerun()
-    else:
-        st.info("No hay cuentas en esta industria con los filtros actuales.")
-
-# =============================================================
-# INSIGHTS POR INDUSTRIA (Tabs)
-# =============================================================
-
-st.divider()
-st.subheader("Insights por Industria: Casos de Uso Snowflake")
-st.caption("Tendencias, retos y oportunidades generadas con Cortex AI")
-
-industrias_ci = sorted(df_casos["INDUSTRIA_NOMBRE"].unique())
-if industrias_ci:
-    tabs = st.tabs(industrias_ci)
-    for tab, industria in zip(tabs, industrias_ci):
-        with tab:
-            caso = df_casos[df_casos["INDUSTRIA_NOMBRE"] == industria].iloc[0]
-            n_cuentas = len(dff[dff["INDUSTRIA_NOMBRE"] == industria])
-            st.caption(f"{n_cuentas} cuentas en esta industria")
-            with st.container(border=True):
-                st.markdown("**Propuesta de Valor**")
-                st.info(str(caso["PROPUESTA_VALOR"])[:1000])
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                with st.container(border=True, height=350):
-                    st.markdown("**Tendencias 2025-2026**")
-                    st.write(str(caso["TENDENCIAS_INDUSTRIA"])[:1500])
-            with c2:
-                with st.container(border=True, height=350):
-                    st.markdown("**Retos Principales**")
-                    st.write(str(caso["RETOS_PRINCIPALES"])[:1500])
-            with c3:
-                with st.container(border=True, height=350):
-                    st.markdown("**Casos de Uso Snowflake**")
-                    st.write(str(caso["CASOS_USO_SNOWFLAKE"])[:1500])
-
-# =============================================================
 # APERTURA UNICA DEL DIALOG (evita duplicados)
 # =============================================================
 
@@ -1053,4 +1059,4 @@ if "_open_cuenta" in st.session_state and st.session_state["_open_cuenta"]:
 # =============================================================
 
 st.divider()
-st.caption("Dashboard Leads Snowflake World Tour 2025 v3 (cloud-ready) | DB_LEADS_SNOWFLAKE_WT25 | EGOS BI + Cortex AI")
+st.caption("Dashboard Leads Snowflake World Tour 2025 v4 | DB_LEADS_SNOWFLAKE_WT25 | EGOS BI + Cortex AI")
