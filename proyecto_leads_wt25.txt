@@ -4,7 +4,7 @@ Base de Datos: DB_LEADS_SNOWFLAKE_WT25
 Conexion Snowflake: TXA18114 (account: TDA19796, user: PEDRO_ULLOA)
 Warehouse: COMPUTE_WH | Role: ACCOUNTADMIN
 Fecha inicio: 2026-03-23
-Ultima sesion: 2026-03-27 (sesion 6 - Dashboard v4: pestanas, wa.me, filtro medio contacto)
+Ultima sesion: 2026-03-28 (sesion 7 - Dashboard v5: pitch persistente, industria editable, scroll KPI, multi-email)
 =============================================================
 
 ## ARQUITECTURA DE LA BASE DE DATOS
@@ -617,3 +617,88 @@ Leads_datos_SnowflakeWT25/
 7. Si cambia de equipo: ajustar rutas en tmp_*.py y verificar connections.toml
 8. Lanzar dashboard local: streamlit.exe run C:\Users\pedro\dashboard_leads_wt25.py --server.port 8503
 
+## NOTAS SESION 7 (2026-03-28)
+
+### Dashboard v4 -> v5 cambios:
+
+#### 1. KPIs como botones clickables con filtrado:
+- 7 st.button() reemplazan st.metric() en la barra de KPIs
+- Click en cualquier KPI establece _kpi_filter en session_state
+- La seccion Gestion de Leads filtra df segun el KPI seleccionado
+- Boton "Limpiar filtro" para resetear
+- Botones tambien debajo de graficas de Industria y Pipeline
+
+#### 2. Auto-scroll a Gestion de Leads:
+- _scroll_to_leads() usa components.html() (no st.html() que es sandboxed iframe)
+- Accede a window.parent.document para buscar el header "Gestion de Leads"
+- Timestamp inyectado como comentario HTML para cache-busting (evita que Streamlit reutilice JS)
+- Ancla <div id="gestion-leads"> con st.markdown(unsafe_allow_html=True)
+- Se ejecuta al clickear cualquier KPI o boton de grafica
+
+#### 3. Grafica de actividad (stacked bar):
+- Nueva grafica en tab Graficas: interacciones por periodo
+- Radio toggle: dia/semana/mes
+- px.bar stacked por TIPO de interaccion
+- Usa load_all_interacciones() con cache
+
+#### 4. Industria editable en "Editar Datos Cuenta":
+- Selectbox con 17 industrias + mapa industria_id_map
+- Layout cambiado de ec1,ec2 a ec1,ec2,ec3
+- UPDATE DIM_CUENTAS SET INDUSTRIA_ID = nuevo_id
+- Permite reclasificar cuentas mal mapeadas por el LLM
+
+#### 5. Pitch IA persistente en session_state:
+- Pitch y siguiente_accion guardados en st.session_state[f"_pitch_{cuenta_id}"]
+- Eliminado st.rerun() post-generacion (cerraba el @st.dialog)
+- Visualizacion lee de session_state (sobrevive reruns dentro del dialog)
+- Limpieza automatica al cambiar de accion en el selectbox
+
+#### 6. Formulario inline de contactos con pitch:
+- Checkboxes por contacto (pre-seleccionados si no contactados, disabled si ya contactados)
+- Metodo default: EMAIL
+- Resultado default: SIN_RESPUESTA
+- Notas default: "Email de primer contacto enviado"
+- Boton "Guardar accion y marcar contactados": registra interaccion IA + marca contactos seleccionados
+
+#### 7. Multi-email en pitch:
+- mailto: incluye TODOS los contactos con email como destinatarios (comma-separated)
+- Link muestra nombres de todos los destinatarios
+
+#### 8. Marcar como Contactado con checkboxes:
+- Checkboxes reemplazan selectbox para seleccion multiple de contactos
+- Permite marcar varios contactos a la vez
+
+#### 9. Limpieza de columnas en tabla:
+- Columna "Cont." eliminada (8 -> 7 columnas)
+- "Contacto" renombrada a "Contacto Princ."
+
+#### 10. Query principal actualizado:
+- Agregado c.INDUSTRIA_ID al SELECT para tener FK disponible en row
+
+### Tecnicas aprendidas (sesion 7):
+- st.html() renderiza en iframe sandboxed: no puede acceder al DOM principal de Streamlit
+- components.html() (streamlit.components.v1) SI puede acceder via window.parent.document
+- Streamlit cachea contenido HTML identico y no re-ejecuta JS: inyectar timestamp como
+  comentario HTML <!-- {ts} --> para forzar re-ejecucion en cada rerun
+- st.rerun() cierra dialogos @st.dialog: NO usar rerun dentro de dialogs para mostrar contenido
+  generado; en su lugar, guardar en session_state y mostrar inline en el mismo ciclo
+- session_state se actualiza inmediatamente en el mismo ciclo de Python: se puede escribir
+  y leer en bloques consecutivos sin necesidad de rerun
+
+### Git (sesion 7):
+- 2853f79: Dashboard v5: Pitch IA persistente, formulario contactos inline, industria editable, scroll KPI, multi-email
+- Push: origin/master actualizado
+
+### Archivos modificados en sesion 7:
+- scripts/python/dashboard_leads_wt25.py (1339 lineas, v5)
+- app.py (sincronizado, copia identica del dashboard)
+- proyecto_leads_wt25.txt (este archivo)
+
+### Para retomar en proxima sesion:
+1. Dashboard v5 publicado en GitHub (2853f79), corriendo en http://localhost:8503
+2. Pendiente: enriquecimiento de datos de contactos (LinkedIn, sitio web, tamano empresa)
+3. Pendiente: generar reporte PDF profesional con paleta EGOS BI
+4. Pendiente: agregar estandar de deployment al marco de trabajo
+5. Pendiente: agregar lecciones aprendidas al marco de trabajo
+6. Si cambia de equipo: ajustar rutas en tmp_*.py y verificar connections.toml
+7. Lanzar dashboard local: streamlit.exe run C:\Users\pedro\dashboard_leads_wt25.py --server.port 8503
