@@ -1,20 +1,22 @@
 # =============================================================
-# dashboard_leads_wt25.py  (v5 - KPIs clickables, actividad, multi-contacto)
+# dashboard_leads_wt25.py  (v6 - Dialog persistente, Pitch IA con contexto web)
 # Dashboard interactivo para gestion de Leads del Snowflake World Tour 2025
 # Incluye: KPIs interactivos, graficas, gestion de contactos, pitch IA, pipeline
-# v5: KPIs/graficas clickables con scroll, grafica actividad, marcar multiples
+# v6: Dialog no se cierra al ejecutar acciones, pitch IA incluye info sitio web
 # Compatible: Local (connection_name) y Streamlit Community Cloud (st.secrets)
-# Creado: 2026-03-23 | Actualizado: 2026-03-27 | Conexion: TXA18114
+# Creado: 2026-03-23 | Actualizado: 2026-03-30 | Conexion: TXA18114
 # Proyecto: Leads Snowflake WT25 - EGOS BI
 # =============================================================
 
 import os
+import re
 import urllib.parse
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
 import snowflake.connector
+import requests
 from datetime import datetime
 from cryptography.hazmat.primitives import serialization
 
@@ -388,6 +390,35 @@ def whatsapp_link_md(numero):
     return f"[{raw}](https://wa.me/{limpio})"
 
 
+@st.cache_data(ttl=300)
+def fetch_website_text(url, max_chars=1500):
+    """Extrae texto limpio del sitio web de una empresa para contexto del pitch.
+    Retorna string con descripcion de la empresa o cadena vacia si falla."""
+    if not url or not str(url).strip():
+        return ""
+    url = str(url).strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    try:
+        resp = requests.get(url, timeout=8, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; EgosBI-Dashboard/1.0)"
+        })
+        resp.raise_for_status()
+        html = resp.text[:50000]  # Limitar HTML a 50k chars para no saturar memoria
+        # Remover scripts, styles y tags HTML
+        html = re.sub(r'<script[^>]*>.*?</script>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(r'<style[^>]*>.*?</style>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(r'<[^>]+>', ' ', html)
+        # Limpiar entidades HTML y espacios multiples
+        html = html.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+        text = re.sub(r'\s+', ' ', html).strip()
+        if len(text) > max_chars:
+            text = text[:max_chars] + "..."
+        return text
+    except Exception:
+        return ""
+
+
 # =============================================================
 # DIALOG: TARJETA DE DETALLE DE CUENTA (popup)
 # =============================================================
@@ -401,6 +432,11 @@ def mostrar_tarjeta_cuenta(acct_name):
         return
     row = row.iloc[0]
     cuenta_id = int(row["CUENTA_ID"])
+
+    # Boton cerrar al inicio del dialog
+    if st.button("Cerrar ventana", key=f"close_dialog_{cuenta_id}", type="secondary"):
+        st.cache_data.clear()
+        st.rerun()
 
     # -- Datos principales --
     st.markdown(f"### {acct_name}")
@@ -509,7 +545,6 @@ def mostrar_tarjeta_cuenta(acct_name):
                     if ok_count > 0:
                         st.success(f"{ok_count} contacto(s) marcado(s) como contactado(s) via {metodo}.")
                         st.cache_data.clear()
-                        st.rerun()
 
     # ---- AGREGAR CONTACTO ----
     elif action == "Agregar Contacto":
@@ -528,7 +563,6 @@ def mostrar_tarjeta_cuenta(acct_name):
                 if agregar_contacto(cuenta_id, nombre, apellido, cargo, email_new, whatsapp_new, linkedin_new):
                     st.success(f"Contacto {nombre} {apellido} agregado.")
                     st.cache_data.clear()
-                    st.rerun()
 
     # ---- CAMBIAR CONTACTO PRINCIPAL ----
     elif action == "Cambiar Contacto Principal":
@@ -550,7 +584,6 @@ def mostrar_tarjeta_cuenta(acct_name):
                 if cambiar_contacto_principal(cuenta_id, nuevo_id):
                     st.success(f"Contacto principal cambiado a {sel_nuevo}.")
                     st.cache_data.clear()
-                    st.rerun()
 
     # ---- EDITAR DATOS CUENTA ----
     elif action == "Editar Datos Cuenta":
@@ -612,7 +645,6 @@ def mostrar_tarjeta_cuenta(acct_name):
                 if actualizar_cuenta(cuenta_id, campos):
                     st.success("Datos actualizados.")
                     st.cache_data.clear()
-                    st.rerun()
 
     # ---- REGISTRAR INTERACCION ----
     elif action == "Registrar Interaccion":
@@ -633,7 +665,6 @@ def mostrar_tarjeta_cuenta(acct_name):
             if registrar_interaccion(cuenta_id, ct_id2, tipo, descripcion, resultado_i, siguiente):
                 st.success("Interaccion registrada.")
                 st.cache_data.clear()
-                st.rerun()
 
     # ---- GENERAR PITCH CON IA ----
     elif action == "Generar Pitch con IA":
@@ -663,6 +694,15 @@ def mostrar_tarjeta_cuenta(acct_name):
         contexto += f"\nEstatus actual: {row['ESTATUS']}"
         contexto += f"\nFuente: Snowflake World Tour 2025"
         contexto += insights_ctx
+
+        # Obtener contenido del sitio web si existe
+        sitio_web = row.get("SITIO_WEB", "") or ""
+        web_text = ""
+        if sitio_web.strip():
+            with st.spinner("Consultando sitio web de la empresa..."):
+                web_text = fetch_website_text(sitio_web)
+            if web_text:
+                contexto += f"\n\nInformacion extraida del sitio web ({sitio_web}):\n{web_text}"
 
         df_hist = load_interacciones_cuenta(cuenta_id)
         if not df_hist.empty:
@@ -702,6 +742,8 @@ def mostrar_tarjeta_cuenta(acct_name):
                         f"NO menciones demos, demostraciones ni pruebas de concepto. Solo proponer una llamada breve para platicar. "
                         f"NUNCA uses la frase 'potencialidad de Snowflake' ni 'potencial de Snowflake'. "
                         f"Si mencionas potencial, di 'el potencial de tus datos'. El enfoque es el valor para el cliente, no el producto. "
+                        f"Si se incluye informacion del sitio web de la empresa, usala para personalizar el mensaje: "
+                        f"menciona algo especifico de lo que hacen o a que se dedican segun su sitio web. "
                         f"Tono: profesional, cercano, de seguimiento. Datos:\n{contexto}"
                     )
                     cur_ai.execute("SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.1-8b', %s)", (prompt_pitch,))
@@ -793,7 +835,6 @@ def mostrar_tarjeta_cuenta(acct_name):
                 st.session_state.pop(_pk, None)
                 st.session_state.pop(_ak, None)
                 st.cache_data.clear()
-                st.rerun()
 
     # ---- DESCALIFICAR LEAD ----
     elif action == "Descalificar Lead":
@@ -813,7 +854,6 @@ def mostrar_tarjeta_cuenta(acct_name):
                     if actualizar_cuenta(cuenta_id, campos):
                         st.success(f"Lead descalificado: {acct_name}")
                         st.cache_data.clear()
-                        st.rerun()
 
 
 # =============================================================

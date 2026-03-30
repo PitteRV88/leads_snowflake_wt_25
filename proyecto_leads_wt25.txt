@@ -4,7 +4,7 @@ Base de Datos: DB_LEADS_SNOWFLAKE_WT25
 Conexion Snowflake: TXA18114 (account: TDA19796, user: PEDRO_ULLOA)
 Warehouse: COMPUTE_WH | Role: ACCOUNTADMIN
 Fecha inicio: 2026-03-23
-Ultima sesion: 2026-03-28 (sesion 7 - Dashboard v5: pitch persistente, industria editable, scroll KPI, multi-email)
+Ultima sesion: 2026-03-30 (sesion 8 - Dashboard v6: Dialog persistente, Pitch IA con contexto web)
 =============================================================
 
 ## ARQUITECTURA DE LA BASE DE DATOS
@@ -702,3 +702,63 @@ Leads_datos_SnowflakeWT25/
 5. Pendiente: agregar lecciones aprendidas al marco de trabajo
 6. Si cambia de equipo: ajustar rutas en tmp_*.py y verificar connections.toml
 7. Lanzar dashboard local: streamlit.exe run C:\Users\pedro\dashboard_leads_wt25.py --server.port 8503
+
+=============================================================
+SESION 8 - 2026-03-30 - Dashboard v6: Dialog persistente + Pitch IA con contexto web
+=============================================================
+
+### Objetivo:
+Dos mejoras al dashboard:
+1. Dialog de detalle de cuenta NO se cierra al ejecutar acciones (actualizar datos, registrar interaccion, etc.)
+2. Pitch IA incluye informacion del sitio web de la empresa como contexto adicional
+
+### Cambios realizados:
+
+#### 1. Dialog persistente (no se cierra al guardar):
+- Eliminados 7 st.rerun() de todas las acciones dentro del dialog @st.dialog:
+  * Marcar como Contactado
+  * Agregar Contacto
+  * Cambiar Contacto Principal
+  * Editar Datos Cuenta
+  * Registrar Interaccion
+  * Guardar accion y marcar contactados (Pitch IA)
+  * Descalificar Lead
+- Se mantiene st.cache_data.clear() para invalidar cache sin cerrar el dialog
+- Agregado boton "Cerrar ventana" al inicio del dialog que hace cache_data.clear() + st.rerun()
+- Limitacion de Streamlit: click fuera del dialog aun lo cierra (comportamiento del framework, no se puede deshabilitar)
+
+#### 2. Pitch IA con contexto web:
+- Nueva funcion fetch_website_text(url, max_chars=1500):
+  * Usa requests.get() con timeout de 8 segundos
+  * Extrae texto limpio del HTML (remueve scripts, styles, tags)
+  * Limita a 1500 caracteres para no saturar el prompt
+  * Maneja errores gracefully (retorna cadena vacia si falla)
+  * Cacheada con @st.cache_data(ttl=300) para evitar requests repetidos
+- Integrado en seccion "Generar Pitch con IA":
+  * Si la cuenta tiene SITIO_WEB, se consulta y se agrega al contexto
+  * Spinner "Consultando sitio web de la empresa..." durante la consulta
+  * Prompt actualizado para instruir al modelo a usar la info del sitio web
+- Agregado import requests e import re al inicio del archivo
+- Agregado requests>=2.31.0 a requirements.txt
+
+### Archivos modificados en sesion 8:
+- scripts/python/dashboard_leads_wt25.py (1379 lineas, v6)
+- app.py (sincronizado, copia identica del dashboard)
+- requirements.txt (agregado requests>=2.31.0)
+- proyecto_leads_wt25.txt (este archivo)
+
+### Lecciones aprendidas (sesion 8):
+- st.rerun() dentro de @st.dialog cierra el dialog porque reinicia todo el script
+- Solucion: eliminar st.rerun() y solo hacer st.cache_data.clear() para invalidar cache
+- El usuario ve el mensaje de exito y puede seguir trabajando en el dialog
+- Para cerrar el dialog, el usuario usa el boton "Cerrar ventana" o hace click fuera
+- fetch de sitios web debe tener timeout agresivo (8s) para no bloquear el dashboard
+- Cachear resultados de fetch con ttl para evitar requests repetidos en la misma sesion
+
+### Para retomar en proxima sesion:
+1. Dashboard v6 publicado en GitHub, auto-deploy a Streamlit Cloud
+2. Pendiente: enriquecimiento de datos de contactos (LinkedIn, sitio web, tamano empresa)
+3. Pendiente: generar reporte PDF profesional con paleta EGOS BI
+4. Pendiente: agregar estandar de deployment al marco de trabajo
+5. Pendiente: agregar lecciones aprendidas al marco de trabajo
+6. Si cambia de equipo: ajustar rutas en tmp_*.py y verificar connections.toml
