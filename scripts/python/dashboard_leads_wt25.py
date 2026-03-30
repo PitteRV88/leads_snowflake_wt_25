@@ -543,8 +543,10 @@ def mostrar_tarjeta_cuenta(acct_name):
                         if marcar_contactado(cid, cuenta_id, metodo, resultado, notas):
                             ok_count += 1
                     if ok_count > 0:
-                        st.success(f"{ok_count} contacto(s) marcado(s) como contactado(s) via {metodo}.")
                         st.cache_data.clear()
+                        st.session_state["_open_cuenta"] = acct_name
+                        st.session_state["_toast_msg"] = f"{ok_count} contacto(s) marcado(s) como contactado(s) via {metodo}."
+                        st.rerun()
 
     # ---- AGREGAR CONTACTO ----
     elif action == "Agregar Contacto":
@@ -561,8 +563,10 @@ def mostrar_tarjeta_cuenta(acct_name):
                 st.error("El nombre es obligatorio.")
             else:
                 if agregar_contacto(cuenta_id, nombre, apellido, cargo, email_new, whatsapp_new, linkedin_new):
-                    st.success(f"Contacto {nombre} {apellido} agregado.")
                     st.cache_data.clear()
+                    st.session_state["_open_cuenta"] = acct_name
+                    st.session_state["_toast_msg"] = f"Contacto {nombre} {apellido} agregado."
+                    st.rerun()
 
     # ---- CAMBIAR CONTACTO PRINCIPAL ----
     elif action == "Cambiar Contacto Principal":
@@ -582,8 +586,10 @@ def mostrar_tarjeta_cuenta(acct_name):
             if st.button("Cambiar Principal", key=f"cp_save_{cuenta_id}", type="primary"):
                 nuevo_id = contacto_opts_p[sel_nuevo]
                 if cambiar_contacto_principal(cuenta_id, nuevo_id):
-                    st.success(f"Contacto principal cambiado a {sel_nuevo}.")
                     st.cache_data.clear()
+                    st.session_state["_open_cuenta"] = acct_name
+                    st.session_state["_toast_msg"] = f"Contacto principal cambiado a {sel_nuevo}."
+                    st.rerun()
 
     # ---- EDITAR DATOS CUENTA ----
     elif action == "Editar Datos Cuenta":
@@ -643,8 +649,10 @@ def mostrar_tarjeta_cuenta(acct_name):
                     "NOTAS": nuevas_notas, "FUENTE_TAMANO": "MANUAL"
                 }
                 if actualizar_cuenta(cuenta_id, campos):
-                    st.success("Datos actualizados.")
                     st.cache_data.clear()
+                    st.session_state["_open_cuenta"] = acct_name
+                    st.session_state["_toast_msg"] = "Datos actualizados."
+                    st.rerun()
 
     # ---- REGISTRAR INTERACCION ----
     elif action == "Registrar Interaccion":
@@ -663,8 +671,10 @@ def mostrar_tarjeta_cuenta(acct_name):
         if st.button("Registrar", key=f"ri_save_{cuenta_id}", type="primary"):
             ct_id2 = contacto_opts2[sel_ct2]
             if registrar_interaccion(cuenta_id, ct_id2, tipo, descripcion, resultado_i, siguiente):
-                st.success("Interaccion registrada.")
                 st.cache_data.clear()
+                st.session_state["_open_cuenta"] = acct_name
+                st.session_state["_toast_msg"] = "Interaccion registrada."
+                st.rerun()
 
     # ---- GENERAR PITCH CON IA ----
     elif action == "Generar Pitch con IA":
@@ -830,11 +840,13 @@ def mostrar_tarjeta_cuenta(acct_name):
                 msg = "Accion guardada en historial."
                 if ok_count > 0:
                     msg += f" {ok_count} contacto(s) marcado(s) como contactado(s) via {metodo_pitch}."
-                st.success(msg)
                 # Limpiar pitch del session_state
                 st.session_state.pop(_pk, None)
                 st.session_state.pop(_ak, None)
                 st.cache_data.clear()
+                st.session_state["_open_cuenta"] = acct_name
+                st.session_state["_toast_msg"] = msg
+                st.rerun()
 
     # ---- DESCALIFICAR LEAD ----
     elif action == "Descalificar Lead":
@@ -852,8 +864,10 @@ def mostrar_tarjeta_cuenta(acct_name):
                 else:
                     campos = {"ESTATUS": "DESCALIFICADO", "MOTIVO_DESCALIFICACION": motivo_descal_dialog.strip()}
                     if actualizar_cuenta(cuenta_id, campos):
-                        st.success(f"Lead descalificado: {acct_name}")
                         st.cache_data.clear()
+                        st.session_state["_open_cuenta"] = acct_name
+                        st.session_state["_toast_msg"] = f"Lead descalificado: {acct_name}"
+                        st.rerun()
 
 
 # =============================================================
@@ -861,6 +875,10 @@ def mostrar_tarjeta_cuenta(acct_name):
 # =============================================================
 
 df, df_casos = load_data()
+
+# -- Notificacion toast tras accion exitosa en dialog --
+if "_toast_msg" in st.session_state:
+    st.toast(st.session_state.pop("_toast_msg"), icon="✅")
 
 # =============================================================
 # SIDEBAR: FILTROS
@@ -1236,6 +1254,7 @@ if _kpi_f:
         _filter_label = "Interacciones"
         if st.button("Limpiar filtro", key="limpiar_filtro_inter", type="secondary"):
             st.session_state.pop("_kpi_filter", None)
+            st.session_state.pop("_kpi_filter_prev", None)
             st.rerun()
         df_inter_all = load_all_interacciones()
         if df_inter_all.empty:
@@ -1268,6 +1287,7 @@ if _filter_label:
     st.subheader(f"Gestion de Leads — {_filter_label}")
     if st.button("Limpiar filtro", key="limpiar_filtro_leads", type="secondary"):
         st.session_state.pop("_kpi_filter", None)
+        st.session_state.pop("_kpi_filter_prev", None)
         st.rerun()
 else:
     st.subheader("Gestion de Leads")
@@ -1307,8 +1327,10 @@ if _kpi_f:
     elif ftipo == "industria":
         df_leads = df_leads[df_leads["INDUSTRIA_NOMBRE"] == fvalor]
     # "total" y "contactos" no filtran, muestran todo
-    # Resetear pagina al aplicar filtro
-    st.session_state["leads_page"] = 0
+    # Resetear pagina solo cuando el filtro KPI es nuevo (no en cada rerun)
+    if st.session_state.get("_kpi_filter_prev") != _kpi_f:
+        st.session_state["leads_page"] = 0
+        st.session_state["_kpi_filter_prev"] = _kpi_f
 
 # Paginacion para no renderizar 79 filas de botones
 LEADS_PER_PAGE = 15
@@ -1375,4 +1397,4 @@ if "_open_cuenta" in st.session_state and st.session_state["_open_cuenta"]:
 # =============================================================
 
 st.divider()
-st.caption("Dashboard Leads Snowflake World Tour 2025 v5 | DB_LEADS_SNOWFLAKE_WT25 | EGOS BI + Cortex AI")
+st.caption("Dashboard Leads Snowflake World Tour 2025 v6 | DB_LEADS_SNOWFLAKE_WT25 | EGOS BI + Cortex AI")
