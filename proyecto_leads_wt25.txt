@@ -4,7 +4,7 @@ Base de Datos: DB_LEADS_SNOWFLAKE_WT25
 Conexion Snowflake: TXA18114 (account: TDA19796, user: PEDRO_ULLOA)
 Warehouse: COMPUTE_WH | Role: ACCOUNTADMIN
 Fecha inicio: 2026-03-23
-Ultima sesion: 2026-03-30 (sesion 8 - Dashboard v6: Dialog persistente, Pitch IA con contexto web)
+Ultima sesion: 2026-04-07 (sesion 10 - Pitch IA por cargo, auto-clear filtro KPI, fix st.columns)
 =============================================================
 
 ## ARQUITECTURA DE LA BASE DE DATOS
@@ -694,8 +694,50 @@ Leads_datos_SnowflakeWT25/
 - app.py (sincronizado, copia identica del dashboard)
 - proyecto_leads_wt25.txt (este archivo)
 
+### Para retomar en proxima sesion (post-sesion 9):
+1. Dashboard v6.1 publicado en GitHub (commit 108eadc), auto-deploy a Streamlit Cloud
+2. Pendiente: enriquecimiento de datos de contactos (LinkedIn, sitio web, tamano empresa)
+3. Pendiente: generar reporte PDF profesional con paleta EGOS BI
+4. Pendiente: agregar estandar de deployment al marco de trabajo
+5. Pendiente: agregar lecciones aprendidas al marco de trabajo
+6. Si cambia de equipo: ajustar rutas en tmp_*.py y verificar connections.toml
+
+## SESION 10 (2026-04-07) - Pitch IA por cargo + auto-clear filtro KPI + fix st.columns
+
+### Cambios realizados:
+
+1. Pitch IA personalizado por cargo/rol del contacto (Cambio 1):
+   - Contexto enriquecido: cargo y nivel del contacto se pasan como campos separados al LLM
+   - Seccion PERSONALIZACION POR CARGO en el prompt con ejemplos por rol:
+     CDO -> gobernanza de datos, CTO -> arquitectura escalable,
+     BI/Analytics -> reporteo y democratizacion, AI/ML -> Cortex AI,
+     Ingenieria de Datos -> pipelines eficientes
+   - Caso de uso ahora debe alinearse tanto con la industria como con el rol del contacto
+
+2. Auto-clear filtro KPI en acciones del dialog (Cambio 2):
+   - Agregado pop("_kpi_filter") y pop("_kpi_filter_prev") en los 7 bloques de acciones:
+     Marcar Contactado, Agregar Contacto, Cambiar Contacto Principal,
+     Editar Datos Cuenta, Registrar Interaccion, Guardar Pitch/Accion, Descalificar Lead
+   - Esto evita el error cuando un filtro activo ya no incluye la cuenta tras cambiar estatus
+
+3. Fix st.columns con DataFrame vacio (Bug encontrado en testing):
+   - st.columns(0) es invalido en Streamlit, ocurria cuando dff filtrado quedaba vacio
+   - Agregado guard "if not ...empty" antes de crear columnas de botones de industria y estatus
+   - Corregidos 2 bloques: botones de industria y botones de pipeline
+
+### Archivos modificados en sesion 10:
+- scripts/python/dashboard_leads_wt25.py (1431 lineas, v6.2)
+- app.py (sincronizado, copia identica del dashboard)
+- proyecto_leads_wt25.txt (este archivo)
+
+### Lecciones aprendidas (sesion 10):
+- Siempre validar que DataFrames no esten vacios antes de usar len() en st.columns()
+- Las rutas OneDrive con espacios en Windows CMD requieren rutas cortas 8.3 (ONEDRI~1)
+- Al limpiar filtros en session_state, limpiar tambien variables auxiliares (_kpi_filter_prev)
+- Probar escenarios de filtro + accion de cambio de estatus como caso de prueba obligatorio
+
 ### Para retomar en proxima sesion:
-1. Dashboard v5 publicado en GitHub (2853f79), corriendo en http://localhost:8503
+1. Dashboard v6.2 publicado en GitHub, auto-deploy a Streamlit Cloud
 2. Pendiente: enriquecimiento de datos de contactos (LinkedIn, sitio web, tamano empresa)
 3. Pendiente: generar reporte PDF profesional con paleta EGOS BI
 4. Pendiente: agregar estandar de deployment al marco de trabajo
@@ -756,7 +798,72 @@ Dos mejoras al dashboard:
 - Cachear resultados de fetch con ttl para evitar requests repetidos en la misma sesion
 
 ### Para retomar en proxima sesion:
-1. Dashboard v6 publicado en GitHub, auto-deploy a Streamlit Cloud
+1. Dashboard v6.1 publicado en GitHub (commit 108eadc), auto-deploy a Streamlit Cloud
+2. Pendiente: enriquecimiento de datos de contactos (LinkedIn, sitio web, tamano empresa)
+3. Pendiente: generar reporte PDF profesional con paleta EGOS BI
+4. Pendiente: agregar estandar de deployment al marco de trabajo
+5. Pendiente: agregar lecciones aprendidas al marco de trabajo
+6. Si cambia de equipo: ajustar rutas en tmp_*.py y verificar connections.toml
+
+## SESION 9 (2026-03-30): UI fixes - Dialog reopen, toast, paginacion
+Fecha: 2026-03-30
+Commit: 108eadc
+Tipo: Ajustes UI y correccion de bugs
+
+### Cambios realizados en sesion 9:
+
+#### 1. Dialog reopen pattern (refresco de datos sin cerrar):
+- Problema: En sesion 8 se elimino st.rerun() para que el dialog no se cerrara,
+  pero esto causaba que los datos mostrados quedaran desactualizados (stale).
+  El usuario no podia encadenar acciones (ej: guardar URL -> generar pitch)
+  sin cerrar y reabrir manualmente el dialog.
+- Solucion: Patron "reopen" - en cada accion exitosa:
+  1. st.cache_data.clear() -> invalida cache de datos
+  2. st.session_state["_open_cuenta"] = acct_name -> marca para reabrir
+  3. st.session_state["_toast_msg"] = "mensaje" -> guarda notificacion
+  4. st.rerun() -> reinicia el script
+  El mecanismo existente en linea ~1387 detecta _open_cuenta y reabre el dialog
+  automaticamente con datos frescos. El cierre+reapertura es instantaneo.
+- Aplicado a las 7 acciones del dialog:
+  * Marcar como Contactado
+  * Agregar Contacto
+  * Cambiar Contacto Principal
+  * Editar Datos Cuenta
+  * Registrar Interaccion
+  * Guardar accion y marcar contactados (Pitch IA)
+  * Descalificar Lead
+
+#### 2. Notificaciones toast verdes:
+- Agregado st.toast() (Streamlit >= 1.55) despues de load_data()
+- Consume _toast_msg del session_state y muestra notificacion flotante con icono verde
+- Se desvanece automaticamente en ~5 segundos
+- Reemplaza los anteriores st.success() estaticos dentro del dialog
+
+#### 3. Fix de paginacion con filtros KPI:
+- Bug: Al hacer click en un KPI (ej: "Contactados") y luego en "Siguiente",
+  la paginacion no cambiaba - siempre mostraba la misma pagina.
+- Causa raiz: st.session_state["leads_page"] = 0 se ejecutaba en cada rerun
+  cuando _kpi_filter existia en session_state. Como el filtro nunca se eliminaba
+  (solo con "Limpiar filtro"), cada rerun reseteaba la pagina a 0.
+- Solucion: Comparar _kpi_filter con _kpi_filter_prev. Solo resetear leads_page
+  cuando el filtro cambia (nuevo filtro o filtro diferente), no en cada rerun.
+  Al limpiar filtro, se limpia tambien _kpi_filter_prev.
+
+### Archivos modificados en sesion 9:
+- scripts/python/dashboard_leads_wt25.py (1401 lineas, v6.1)
+- app.py (sincronizado, copia identica del dashboard)
+- proyecto_leads_wt25.txt (este archivo)
+
+### Lecciones aprendidas (sesion 9):
+- Eliminar st.rerun() del dialog no es suficiente: los datos quedan stale
+- Patron correcto: reopen via session_state flags + st.rerun() = cierre+reapertura instantanea
+- st.toast() es ideal para notificaciones efimeras en Streamlit (no ocupa espacio permanente)
+- Cuidado con resetear estado en bloques condicionales que se ejecutan en cada rerun
+  (el filtro KPI persistia y reseteaba la pagina en cada ciclo)
+- Siempre validar en local antes de publicar (regla del marco de trabajo sesion 8)
+
+### Para retomar en proxima sesion:
+1. Dashboard v6.1 publicado en GitHub (commit 108eadc), auto-deploy a Streamlit Cloud
 2. Pendiente: enriquecimiento de datos de contactos (LinkedIn, sitio web, tamano empresa)
 3. Pendiente: generar reporte PDF profesional con paleta EGOS BI
 4. Pendiente: agregar estandar de deployment al marco de trabajo

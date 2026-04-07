@@ -546,6 +546,8 @@ def mostrar_tarjeta_cuenta(acct_name):
                         st.cache_data.clear()
                         st.session_state["_open_cuenta"] = acct_name
                         st.session_state["_toast_msg"] = f"{ok_count} contacto(s) marcado(s) como contactado(s) via {metodo}."
+                        st.session_state.pop("_kpi_filter", None)
+                        st.session_state.pop("_kpi_filter_prev", None)
                         st.rerun()
 
     # ---- AGREGAR CONTACTO ----
@@ -566,6 +568,8 @@ def mostrar_tarjeta_cuenta(acct_name):
                     st.cache_data.clear()
                     st.session_state["_open_cuenta"] = acct_name
                     st.session_state["_toast_msg"] = f"Contacto {nombre} {apellido} agregado."
+                    st.session_state.pop("_kpi_filter", None)
+                    st.session_state.pop("_kpi_filter_prev", None)
                     st.rerun()
 
     # ---- CAMBIAR CONTACTO PRINCIPAL ----
@@ -589,6 +593,8 @@ def mostrar_tarjeta_cuenta(acct_name):
                     st.cache_data.clear()
                     st.session_state["_open_cuenta"] = acct_name
                     st.session_state["_toast_msg"] = f"Contacto principal cambiado a {sel_nuevo}."
+                    st.session_state.pop("_kpi_filter", None)
+                    st.session_state.pop("_kpi_filter_prev", None)
                     st.rerun()
 
     # ---- EDITAR DATOS CUENTA ----
@@ -652,6 +658,8 @@ def mostrar_tarjeta_cuenta(acct_name):
                     st.cache_data.clear()
                     st.session_state["_open_cuenta"] = acct_name
                     st.session_state["_toast_msg"] = "Datos actualizados."
+                    st.session_state.pop("_kpi_filter", None)
+                    st.session_state.pop("_kpi_filter_prev", None)
                     st.rerun()
 
     # ---- REGISTRAR INTERACCION ----
@@ -674,6 +682,8 @@ def mostrar_tarjeta_cuenta(acct_name):
                 st.cache_data.clear()
                 st.session_state["_open_cuenta"] = acct_name
                 st.session_state["_toast_msg"] = "Interaccion registrada."
+                st.session_state.pop("_kpi_filter", None)
+                st.session_state.pop("_kpi_filter_prev", None)
                 st.rerun()
 
     # ---- GENERAR PITCH CON IA ----
@@ -700,7 +710,11 @@ def mostrar_tarjeta_cuenta(acct_name):
         if row["UBICACION"]:
             contexto += f"\nUbicacion: {row['UBICACION']}"
         if row["CONTACTO_NOMBRE"]:
-            contexto += f"\nContacto: {row['CONTACTO_NOMBRE']} ({row['CONTACTO_CARGO'] or 'N/A'})"
+            contexto += f"\nContacto: {row['CONTACTO_NOMBRE']}"
+            if row["CONTACTO_CARGO"] and str(row["CONTACTO_CARGO"]).strip():
+                contexto += f"\nCargo/Rol del contacto: {row['CONTACTO_CARGO']}"
+            if row.get("CONTACTO_NIVEL") and str(row.get("CONTACTO_NIVEL", "")).strip():
+                contexto += f"\nNivel del contacto: {row['CONTACTO_NIVEL']}"
         contexto += f"\nEstatus actual: {row['ESTATUS']}"
         contexto += f"\nFuente: Snowflake World Tour 2025"
         contexto += insights_ctx
@@ -743,11 +757,19 @@ def mostrar_tarjeta_cuenta(acct_name):
                         f"Genera un mensaje de seguimiento personalizado en espanol (5-6 oraciones) para esta cuenta. "
                         f"CONTEXTO IMPORTANTE: Este lead asistio al Snowflake World Tour celebrado el ano pasado "
                         f"en Ciudad de Mexico. NO asumas que te viste en persona con el contacto. "
+                        f"PERSONALIZACION POR CARGO: Si se incluye el cargo o rol del contacto, usa esa informacion para "
+                        f"personalizar el mensaje segun sus responsabilidades e intereses profesionales. Por ejemplo: "
+                        f"si es Director de Datos o CDO, enfoca el mensaje en gobernanza de datos y toma de decisiones; "
+                        f"si es CTO o VP de Tecnologia, habla de arquitectura escalable y modernizacion; "
+                        f"si es de BI o Analytics, enfoca en reporteo avanzado y democratizacion de datos; "
+                        f"si es de AI/ML, enfoca en Cortex AI y modelos sobre datos unificados; "
+                        f"si es de Ingenieria de Datos, habla de pipelines eficientes y reduccion de complejidad operativa. "
+                        f"El caso de uso que menciones debe hacer sentido con el rol del contacto. "
                         f"Inicia con un saludo a '{nombre_contacto}' diciendo que nos da mucho gusto que haya podido asistir "
                         f"al Snowflake World Tour celebrado el ano pasado, que sabemos que en estos momentos su industria esta "
                         f"enfrentando ciertos retos (menciona uno relevante), y continua con: "
-                        f"1) un caso de uso relevante para su industria donde la combinacion de las capacidades de EGOS BI y Snowflake "
-                        f"puede ayudarles a resolver ese reto o aprovechar una oportunidad, "
+                        f"1) un caso de uso relevante para su industria Y para el rol del contacto, donde la combinacion de las "
+                        f"capacidades de EGOS BI y Snowflake puede ayudarles a resolver ese reto o aprovechar una oportunidad, "
                         f"2) cierra con una pregunta casual tipo: Que te parece si agendamos una llamada de 20 minutos para rebotar ideas? "
                         f"NO menciones demos, demostraciones ni pruebas de concepto. Solo proponer una llamada breve para platicar. "
                         f"NUNCA uses la frase 'potencialidad de Snowflake' ni 'potencial de Snowflake'. "
@@ -846,6 +868,8 @@ def mostrar_tarjeta_cuenta(acct_name):
                 st.cache_data.clear()
                 st.session_state["_open_cuenta"] = acct_name
                 st.session_state["_toast_msg"] = msg
+                st.session_state.pop("_kpi_filter", None)
+                st.session_state.pop("_kpi_filter_prev", None)
                 st.rerun()
 
     # ---- DESCALIFICAR LEAD ----
@@ -867,6 +891,8 @@ def mostrar_tarjeta_cuenta(acct_name):
                         st.cache_data.clear()
                         st.session_state["_open_cuenta"] = acct_name
                         st.session_state["_toast_msg"] = f"Lead descalificado: {acct_name}"
+                        st.session_state.pop("_kpi_filter", None)
+                        st.session_state.pop("_kpi_filter_prev", None)
                         st.rerun()
 
 
@@ -1036,13 +1062,15 @@ with tab_graficas:
             fig_ind.update_traces(textposition="outside")
             st.plotly_chart(fig_ind, width="stretch")
             # Botones clickables por industria
-            st.caption("Click en una industria para filtrar leads:")
-            _ind_cols = st.columns(min(len(ind_counts), 4))
-            for _ic, (_, _ir) in enumerate(ind_counts.iterrows()):
-                with _ind_cols[_ic % min(len(ind_counts), 4)]:
-                    if st.button(f"{_ir['Industria']} ({_ir['Cuentas']})", key=f"gf_ind_{_ic}", use_container_width=True):
-                        st.session_state["_kpi_filter"] = {"tipo": "industria", "valor": _ir["Industria"]}
-                        st.rerun()
+            if not ind_counts.empty:
+                st.caption("Click en una industria para filtrar leads:")
+                _n_ind = min(len(ind_counts), 4)
+                _ind_cols = st.columns(_n_ind)
+                for _ic, (_, _ir) in enumerate(ind_counts.iterrows()):
+                    with _ind_cols[_ic % _n_ind]:
+                        if st.button(f"{_ir['Industria']} ({_ir['Cuentas']})", key=f"gf_ind_{_ic}", use_container_width=True):
+                            st.session_state["_kpi_filter"] = {"tipo": "industria", "valor": _ir["Industria"]}
+                            st.rerun()
 
     with col2:
         with st.container(border=True):
@@ -1059,13 +1087,15 @@ with tab_graficas:
             fig_pipe.update_traces(textposition="outside")
             st.plotly_chart(fig_pipe, width="stretch")
             # Botones clickables por estatus del pipeline
-            st.caption("Click en un estatus para filtrar leads:")
-            _st_cols = st.columns(min(len(status_counts), 4))
-            for _sc, (_, _sr) in enumerate(status_counts.iterrows()):
-                with _st_cols[_sc % min(len(status_counts), 4)]:
-                    if st.button(f"{_sr['Estatus']} ({_sr['Cuentas']})", key=f"gf_pip_{_sc}", use_container_width=True):
-                        st.session_state["_kpi_filter"] = {"tipo": "estatus", "valor": _sr["Estatus"]}
-                        st.rerun()
+            if not status_counts.empty:
+                st.caption("Click en un estatus para filtrar leads:")
+                _n_st = min(len(status_counts), 4)
+                _st_cols = st.columns(_n_st)
+                for _sc, (_, _sr) in enumerate(status_counts.iterrows()):
+                    with _st_cols[_sc % _n_st]:
+                        if st.button(f"{_sr['Estatus']} ({_sr['Cuentas']})", key=f"gf_pip_{_sc}", use_container_width=True):
+                            st.session_state["_kpi_filter"] = {"tipo": "estatus", "valor": _sr["Estatus"]}
+                            st.rerun()
 
     col3, col4 = st.columns(2)
 
