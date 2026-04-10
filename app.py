@@ -720,13 +720,57 @@ def mostrar_tarjeta_cuenta(acct_name):
         contexto += insights_ctx
 
         # Obtener contenido del sitio web si existe
-        sitio_web = row.get("SITIO_WEB", "") or ""
+        sitio_web = str(row.get("SITIO_WEB", "") or "").strip() if row.get("SITIO_WEB") is not None and str(row.get("SITIO_WEB", "")).strip() not in ("", "None", "nan") else ""
         web_text = ""
-        if sitio_web.strip():
+
+        if sitio_web:
+            # Sitio web registrado -> consultar automaticamente
             with st.spinner("Consultando sitio web de la empresa..."):
                 web_text = fetch_website_text(sitio_web)
             if web_text:
                 contexto += f"\n\nInformacion extraida del sitio web ({sitio_web}):\n{web_text}"
+        else:
+            # Sin sitio web -> ofrecer opciones al usuario
+            st.info("Esta cuenta no tiene sitio web registrado.")
+            _sw_key = f"_sw_option_{cuenta_id}"
+            sw_option = st.radio(
+                "¿Que deseas hacer?",
+                ["Agregar sitio web manualmente", "Continuar sin sitio web"],
+                key=_sw_key, horizontal=True
+            )
+            if sw_option == "Agregar sitio web manualmente":
+                _sw_input_key = f"_sw_input_{cuenta_id}"
+                sitio_web_manual = st.text_input(
+                    "URL del sitio web:", key=_sw_input_key,
+                    placeholder="Ej: https://www.empresa.com"
+                )
+                if sitio_web_manual and sitio_web_manual.strip():
+                    sitio_web_manual = sitio_web_manual.strip()
+                    if st.button("Guardar sitio web y continuar", key=f"sw_save_{cuenta_id}"):
+                        if actualizar_cuenta(cuenta_id, {"SITIO_WEB": sitio_web_manual}):
+                            st.cache_data.clear()
+                            st.session_state["_open_cuenta"] = acct_name
+                            st.session_state["_toast_msg"] = f"Sitio web guardado: {sitio_web_manual}"
+                            st.rerun()
+                    # Mientras no guarde, consultar el sitio para el pitch actual
+                    with st.spinner("Consultando sitio web..."):
+                        web_text = fetch_website_text(sitio_web_manual)
+                    if web_text:
+                        contexto += f"\n\nInformacion extraida del sitio web ({sitio_web_manual}):\n{web_text}"
+            else:
+                # Continuar sin sitio web: usar dominio del email como contexto alternativo
+                email_contacto = str(row.get("CONTACTO_EMAIL", "") or "").strip()
+                if email_contacto and "@" in email_contacto:
+                    dominio = email_contacto.split("@")[1]
+                    # Excluir dominios genericos que no aportan contexto empresarial
+                    dominios_genericos = {"gmail.com", "hotmail.com", "outlook.com", "yahoo.com", "live.com", "icloud.com", "protonmail.com", "aol.com"}
+                    if dominio.lower() not in dominios_genericos:
+                        contexto += f"\n\nNota: No se tiene sitio web registrado. El dominio del email del contacto es {dominio}, que podria corresponder al sitio web de la empresa."
+                        # Intentar consultar el dominio como sitio web
+                        with st.spinner(f"Consultando {dominio}..."):
+                            web_text = fetch_website_text(f"https://{dominio}")
+                        if web_text:
+                            contexto += f"\nInformacion extraida de {dominio}:\n{web_text}"
 
         df_hist = load_interacciones_cuenta(cuenta_id)
         if not df_hist.empty:
