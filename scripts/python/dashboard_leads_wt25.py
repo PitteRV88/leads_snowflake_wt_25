@@ -419,6 +419,41 @@ def fetch_website_text(url, max_chars=1500):
         return ""
 
 
+def inferir_sitio_web(dominio):
+    """Intenta descubrir el sitio web de una empresa a partir del dominio del email.
+    Prueba variantes comunes y valida con HTTP HEAD. Retorna URL valida o ''."""
+    if not dominio or not dominio.strip():
+        return ""
+    dominio = dominio.strip().lower()
+    # Dominios genericos que no corresponden a una empresa
+    genericos = {"gmail.com", "hotmail.com", "outlook.com", "yahoo.com",
+                 "live.com", "icloud.com", "protonmail.com", "aol.com",
+                 "live.com.mx", "hotmail.es", "outlook.es", "yahoo.com.mx"}
+    if dominio in genericos:
+        return ""
+    # Construir lista de URLs candidatas
+    candidatas = []
+    # Primero el dominio tal cual
+    candidatas.append(f"https://www.{dominio}")
+    candidatas.append(f"https://{dominio}")
+    # Si tiene subdominio (ej: mx.att.com, correo.uia.mx), probar dominio padre
+    partes = dominio.split(".")
+    if len(partes) > 2:
+        dominio_padre = ".".join(partes[-2:])  # ej: att.com, uia.mx
+        candidatas.append(f"https://www.{dominio_padre}")
+        candidatas.append(f"https://{dominio_padre}")
+    for url in candidatas:
+        try:
+            resp = requests.head(url, timeout=5, allow_redirects=True, headers={
+                "User-Agent": "Mozilla/5.0 (compatible; EgosBI-Dashboard/1.0)"
+            })
+            if resp.status_code < 400:
+                return url
+        except Exception:
+            continue
+    return ""
+
+
 # =============================================================
 # DIALOG: TARJETA DE DETALLE DE CUENTA (popup)
 # =============================================================
@@ -968,6 +1003,64 @@ with st.sidebar:
     paises = sorted(df["PAIS"].dropna().unique())
     sel_paises = st.multiselect("Pais", paises, default=paises)
     buscar = st.text_input("Buscar empresa", placeholder="Nombre de empresa...")
+
+    # --- Herramientas de enriquecimiento ---
+    st.divider()
+    st.subheader("Herramientas")
+    if st.button("Enriquecer sitios web", help="Busca sitios web para cuentas sin URL usando el dominio del email"):
+        # Obtener cuentas sin sitio web con email corporativo
+        conn_enr = get_connection()
+        cur_enr = conn_enr.cursor()
+        try:
+            cur_enr.execute(f"""
+                SELECT c.CUENTA_ID, c.ACCT_NAME, co.EMAIL
+                FROM {DB}.CORE.DIM_CUENTAS c
+                LEFT JOIN {DB}.CORE.DIM_CONTACTOS co
+                    ON c.CUENTA_ID = co.CUENTA_ID AND co.ES_PRINCIPAL = TRUE
+                WHERE c.SITIO_WEB IS NULL OR TRIM(c.SITIO_WEB) = '' OR c.SITIO_WEB = 'nan'
+            """)
+            cuentas_sin_web = cur_enr.fetchall()
+        finally:
+            cur_enr.close()
+            conn_enr.close()
+
+        if not cuentas_sin_web:
+            st.success("Todas las cuentas ya tienen sitio web registrado.")
+        else:
+            encontrados = 0
+            omitidos_generico = 0
+            fallidos = 0
+            progress = st.progress(0, text="Buscando sitios web...")
+            for i, (cid, nombre, email) in enumerate(cuentas_sin_web):
+                progress.progress((i + 1) / len(cuentas_sin_web),
+                                  text=f"Verificando {nombre}...")
+                if not email or not str(email).strip() or "@" not in str(email):
+                    fallidos += 1
+                    continue
+                dominio = str(email).strip().split("@")[1]
+                url = inferir_sitio_web(dominio)
+                if url == "":
+                    # Verificar si fue por dominio generico
+                    d = dominio.lower()
+                    gens = {"gmail.com", "hotmail.com", "outlook.com", "yahoo.com",
+                            "live.com", "icloud.com", "protonmail.com", "aol.com",
+                            "live.com.mx", "hotmail.es", "outlook.es", "yahoo.com.mx"}
+                    if d in gens:
+                        omitidos_generico += 1
+                    else:
+                        fallidos += 1
+                else:
+                    actualizar_cuenta(cid, {"SITIO_WEB": url})
+                    encontrados += 1
+            progress.empty()
+            st.cache_data.clear()
+            st.success(
+                f"Listo: {encontrados} sitios encontrados, "
+                f"{omitidos_generico} con email generico (omitidos), "
+                f"{fallidos} no encontrados."
+            )
+            if encontrados > 0:
+                st.rerun()
 
 # =============================================================
 # APLICAR FILTROS
