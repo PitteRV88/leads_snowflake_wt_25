@@ -1,10 +1,10 @@
 # =============================================================
-# dashboard_leads_wt25.py  (v6 - Dialog persistente, Pitch IA con contexto web)
-# Dashboard interactivo para gestion de Leads del Snowflake World Tour 2025
-# Incluye: KPIs interactivos, graficas, gestion de contactos, pitch IA, pipeline
+# dashboard_leads_wt25.py  (v7 - EGOS BI Lead Manager: multi-evento, carga CSV, vision general)
+# Dashboard interactivo para gestión de Leads - EGOS BI
+# Incluye: KPIs interactivos, graficas, gestión de contactos, pitch IA, pipeline
 # v6: Dialog no se cierra al ejecutar acciones, pitch IA incluye info sitio web
 # Compatible: Local (connection_name) y Streamlit Community Cloud (st.secrets)
-# Creado: 2026-03-23 | Actualizado: 2026-03-30 | Conexion: TXA18114
+# Creado: 2026-03-23 | Actualizado: 2026-03-30 | Conexión: TXA18114
 # Proyecto: Leads Snowflake WT25 - EGOS BI
 # =============================================================
 
@@ -20,9 +20,9 @@ import requests
 from datetime import datetime
 from cryptography.hazmat.primitives import serialization
 
-# -- Configuracion de pagina --
+# -- Configuración de página --
 st.set_page_config(
-    page_title="Leads Snowflake WT25 - EGOS BI",
+    page_title="EGOS BI Lead Manager",
     page_icon="\u2744",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -44,7 +44,7 @@ except Exception:
 # =============================================================
 
 def get_connection():
-    """Conexion fresca. Usa st.secrets (key-pair) en cloud, connection_name en local."""
+    """Conexión fresca. Usa st.secrets (key-pair) en cloud, connection_name en local."""
     if _USE_SECRETS:
         sf = st.secrets["snowflake"]
         # La key puede venir con \n literales o con saltos reales (TOML triple-quote)
@@ -99,6 +99,7 @@ def load_data():
             c.ESTATUS, c.MOTIVO_DESCALIFICACION, c.EJECUTIVO_ID,
             c.FECHA_PRIMER_CONTACTO, c.FECHA_ULTIMO_CONTACTO,
             c.NOTAS, c.FUENTE_CLASIFICACION, c.FUENTE_TAMANO, c.FUENTE_LEAD,
+            c.EVENTO_ID, COALESCE(ev.NOMBRE_EVENTO, c.FUENTE_LEAD) AS NOMBRE_EVENTO,
             bc.CONTACTO_ID, bc.NOMBRE_COMPLETO AS CONTACTO_NOMBRE,
             bc.CARGO AS CONTACTO_CARGO, bc.NIVEL_CARGO AS CONTACTO_NIVEL,
             bc.EMAIL AS CONTACTO_EMAIL, bc.WHATSAPP AS CONTACTO_WHATSAPP,
@@ -108,6 +109,7 @@ def load_data():
             (SELECT COUNT(*) FROM {DB}.CORE.FACT_INTERACCIONES fi WHERE fi.CUENTA_ID = c.CUENTA_ID) AS NUM_INTERACCIONES
         FROM {DB}.CORE.DIM_CUENTAS c
         JOIN {DB}.CORE.DIM_INDUSTRIAS i ON c.INDUSTRIA_ID = i.INDUSTRIA_ID
+        LEFT JOIN {DB}.CORE.DIM_EVENTOS ev ON c.EVENTO_ID = ev.EVENTO_ID
         LEFT JOIN best_contact bc ON c.CUENTA_ID = bc.CUENTA_ID AND bc.RN = 1
         ORDER BY c.ACCT_NAME
     """)
@@ -122,9 +124,17 @@ def load_data():
     """)
     cols_cu = [d[0] for d in cur.description]
     df_casos = pd.DataFrame(cur.fetchall(), columns=cols_cu)
+
+    cur.execute(f"""
+        SELECT EVENTO_ID, NOMBRE_EVENTO, FECHA_EVENTO, DESCRIPCION
+        FROM {DB}.CORE.DIM_EVENTOS
+        ORDER BY FECHA_EVENTO DESC
+    """)
+    cols_ev = [d[0] for d in cur.description]
+    df_eventos = pd.DataFrame(cur.fetchall(), columns=cols_ev)
     cur.close()
     conn.close()
-    return df, df_casos
+    return df, df_casos, df_eventos
 
 
 def load_contactos_cuenta(cuenta_id):
@@ -477,14 +487,14 @@ def mostrar_tarjeta_cuenta(acct_name):
     st.markdown(f"### {acct_name}")
     dc1, dc2, dc3, dc4 = st.columns(4)
     dc1.metric("Industria", row["INDUSTRIA_NOMBRE"])
-    dc2.metric("Tamano", row["TAMANO_EMPRESA"] or "N/A")
+    dc2.metric("Tamaño", row["TAMANO_EMPRESA"] or "N/A")
     dc3.metric("Empleados Est.", f"{int(row['NUM_EMPLEADOS_ESTIMADO']):,}" if row["NUM_EMPLEADOS_ESTIMADO"] else "N/A")
     dc4.metric("Revenue Est.", f"${float(row['REVENUE_ESTIMADO_USD'])/1e6:,.1f}M" if row["REVENUE_ESTIMADO_USD"] else "N/A")
 
     dc5, dc6, dc7, dc8 = st.columns(4)
     dc5.metric("Estatus", row["ESTATUS"])
     if row["ESTATUS"] == "DESCALIFICADO" and row.get("MOTIVO_DESCALIFICACION"):
-        st.warning(f"**Motivo de descalificacion:** {row['MOTIVO_DESCALIFICACION']}")
+        st.warning(f"**Motivo de descalificación:** {row['MOTIVO_DESCALIFICACION']}")
     dc6.markdown(f"**Ubicacion:** {row['UBICACION'] or 'N/A'}")
     if row["SITIO_WEB"] and str(row["SITIO_WEB"]).strip():
         dc7.markdown(f"**Web:** [{row['SITIO_WEB']}]({row['SITIO_WEB']})")
@@ -523,7 +533,7 @@ def mostrar_tarjeta_cuenta(acct_name):
         st.markdown("---")
         st.markdown("**Historial de Interacciones**")
         df_int_display = df_inter[["FECHA", "TIPO", "CONTACTO", "DESCRIPCION", "RESULTADO", "SIGUIENTE_ACCION"]].copy()
-        df_int_display.columns = ["Fecha", "Tipo", "Contacto", "Descripcion", "Resultado", "Siguiente Accion"]
+        df_int_display.columns = ["Fecha", "Tipo", "Contacto", "Descripción", "Resultado", "Siguiente Acción"]
         st.dataframe(df_int_display, width="stretch", hide_index=True, height=200)
 
     # =============================================================
@@ -532,13 +542,13 @@ def mostrar_tarjeta_cuenta(acct_name):
     st.markdown("---")
     st.markdown("**Acciones**")
 
-    action = st.selectbox("Selecciona una accion:", [
+    action = st.selectbox("Selecciona una acción:", [
         "(Seleccionar)",
         "Marcar como Contactado",
         "Agregar Contacto",
         "Cambiar Contacto Principal",
         "Editar Datos Cuenta",
-        "Registrar Interaccion",
+        "Registrar Interacción",
         "Generar Pitch con IA",
         "Descalificar Lead"
     ], key=f"action_{cuenta_id}")
@@ -565,7 +575,7 @@ def mostrar_tarjeta_cuenta(acct_name):
                     label, value=False, key=f"mc_chk_{cuenta_id}_{ctrow['CONTACTO_ID']}",
                     disabled=ya_contactado
                 )
-            metodo = st.selectbox("Metodo:", ["EMAIL", "WHATSAPP", "LLAMADA", "LINKEDIN", "PRESENCIAL"], key=f"mc_met_{cuenta_id}")
+            metodo = st.selectbox("Método:", ["EMAIL", "WHATSAPP", "LLAMADA", "LINKEDIN", "PRESENCIAL"], key=f"mc_met_{cuenta_id}")
             resultado = st.selectbox("Resultado:", ["POSITIVA", "NEGATIVA", "SIN_RESPUESTA", "REPROGRAMADO"], key=f"mc_res_{cuenta_id}")
             notas = st.text_area("Notas:", key=f"mc_not_{cuenta_id}", placeholder="Resumen de la conversacion...")
             seleccionados = [cid for cid, checked in contacto_checks.items() if checked]
@@ -636,7 +646,7 @@ def mostrar_tarjeta_cuenta(acct_name):
     elif action == "Editar Datos Cuenta":
         st.caption(f"Empresa: **{acct_name}** (no editable)")
         estatus_opts = ["PENDIENTE", "CONTACTADO", "EN_SEGUIMIENTO", "CALIFICADO", "OPORTUNIDAD", "DESCARTADO", "DESCALIFICADO"]
-        tamano_opts = ["Micro", "Pequena", "Mediana", "Grande", "Enterprise"]
+        tamano_opts = ["Micro", "Pequeña", "Mediana", "Grande", "Enterprise"]
         industria_opts = ["Automotive", "Consulting/Professional Services", "E-commerce",
                           "Education/Research", "Energy", "Fintech/Financial Services",
                           "Food & Beverage", "Government/Public Sector", "Healthcare/Pharma",
@@ -654,13 +664,13 @@ def mostrar_tarjeta_cuenta(acct_name):
         ec1, ec2, ec3 = st.columns(3)
         nuevo_estatus = ec1.selectbox("Estatus", estatus_opts,
             index=estatus_opts.index(row["ESTATUS"]) if row["ESTATUS"] in estatus_opts else 0, key=f"ed_est_{cuenta_id}")
-        nuevo_tamano = ec2.selectbox("Tamano", tamano_opts,
+        nuevo_tamano = ec2.selectbox("Tamaño", tamano_opts,
             index=tamano_opts.index(row["TAMANO_EMPRESA"]) if row["TAMANO_EMPRESA"] in tamano_opts else 0, key=f"ed_tam_{cuenta_id}")
         nueva_industria = ec3.selectbox("Industria", industria_opts,
             index=industria_opts.index(row["INDUSTRIA_NOMBRE"]) if row["INDUSTRIA_NOMBRE"] in industria_opts else 0, key=f"ed_ind_{cuenta_id}")
         motivo_descal = ""
         if nuevo_estatus == "DESCALIFICADO":
-            motivo_descal = st.text_area("Motivo de descalificacion (obligatorio)",
+            motivo_descal = st.text_area("Motivo de descalificación (obligatorio)",
                 value=row.get("MOTIVO_DESCALIFICACION") or "", key=f"ed_mdesc_{cuenta_id}",
                 placeholder="Describe brevemente por que se descalifica este lead...")
         eg1, eg2, eg3 = st.columns(3)
@@ -676,7 +686,7 @@ def mostrar_tarjeta_cuenta(acct_name):
         nuevas_notas = st.text_area("Notas", value=row["NOTAS"] or "", key=f"ed_not_{cuenta_id}")
         if st.button("Guardar Cambios", key=f"ed_save_{cuenta_id}", type="primary"):
             if nuevo_estatus == "DESCALIFICADO" and not motivo_descal.strip():
-                st.error("Debes indicar el motivo de descalificacion.")
+                st.error("Debes indicar el motivo de descalificación.")
             else:
                 ubicacion = ", ".join(filter(None, [nuevo_ciudad, nuevo_estado, nuevo_pais]))
                 campos = {
@@ -698,7 +708,7 @@ def mostrar_tarjeta_cuenta(acct_name):
                     st.rerun()
 
     # ---- REGISTRAR INTERACCION ----
-    elif action == "Registrar Interaccion":
+    elif action == "Registrar Interacción":
         df_ct2 = load_contactos_cuenta(cuenta_id)
         contacto_opts2 = {"(Sin contacto especifico)": None}
         if not df_ct2.empty:
@@ -708,15 +718,15 @@ def mostrar_tarjeta_cuenta(acct_name):
             )))
         sel_ct2 = st.selectbox("Contacto:", list(contacto_opts2.keys()), key=f"ri_ct_{cuenta_id}")
         tipo = st.selectbox("Tipo:", ["EMAIL", "WHATSAPP", "LLAMADA", "LINKEDIN", "PRESENCIAL", "EVENTO"], key=f"ri_tip_{cuenta_id}")
-        descripcion = st.text_area("Descripcion:", key=f"ri_desc_{cuenta_id}", placeholder="Que se hablo/hizo...")
+        descripcion = st.text_area("Descripción:", key=f"ri_desc_{cuenta_id}", placeholder="Qué se habló/hizo...")
         resultado_i = st.selectbox("Resultado:", ["EXITOSO", "SIN_RESPUESTA", "RECHAZADO", "REPROGRAMADO", "PENDIENTE"], key=f"ri_res_{cuenta_id}")
-        siguiente = st.text_input("Siguiente accion:", key=f"ri_sig_{cuenta_id}", placeholder="Ej: Agendar demo")
+        siguiente = st.text_input("Siguiente acción:", key=f"ri_sig_{cuenta_id}", placeholder="Ej: Agendar demo")
         if st.button("Registrar", key=f"ri_save_{cuenta_id}", type="primary"):
             ct_id2 = contacto_opts2[sel_ct2]
             if registrar_interaccion(cuenta_id, ct_id2, tipo, descripcion, resultado_i, siguiente):
                 st.cache_data.clear()
                 st.session_state["_open_cuenta"] = acct_name
-                st.session_state["_toast_msg"] = "Interaccion registrada."
+                st.session_state["_toast_msg"] = "Interacción registrada."
                 st.session_state.pop("_kpi_filter", None)
                 st.session_state.pop("_kpi_filter_prev", None)
                 st.rerun()
@@ -751,7 +761,7 @@ def mostrar_tarjeta_cuenta(acct_name):
             if row.get("CONTACTO_NIVEL") and str(row.get("CONTACTO_NIVEL", "")).strip():
                 contexto += f"\nNivel del contacto: {row['CONTACTO_NIVEL']}"
         contexto += f"\nEstatus actual: {row['ESTATUS']}"
-        contexto += f"\nFuente: Snowflake World Tour 2025"
+        contexto += f"\nFuente: {row.get('NOMBRE_EVENTO', 'Sin evento')}"
         contexto += insights_ctx
 
         # Obtener contenido del sitio web si existe
@@ -763,7 +773,7 @@ def mostrar_tarjeta_cuenta(acct_name):
             with st.spinner("Consultando sitio web de la empresa..."):
                 web_text = fetch_website_text(sitio_web)
             if web_text:
-                contexto += f"\n\nInformacion extraida del sitio web ({sitio_web}):\n{web_text}"
+                contexto += f"\n\nInformación extraída del sitio web ({sitio_web}):\n{web_text}"
         else:
             # Sin sitio web -> ofrecer opciones al usuario
             st.info("Esta cuenta no tiene sitio web registrado.")
@@ -791,7 +801,7 @@ def mostrar_tarjeta_cuenta(acct_name):
                     with st.spinner("Consultando sitio web..."):
                         web_text = fetch_website_text(sitio_web_manual)
                     if web_text:
-                        contexto += f"\n\nInformacion extraida del sitio web ({sitio_web_manual}):\n{web_text}"
+                        contexto += f"\n\nInformación extraída del sitio web ({sitio_web_manual}):\n{web_text}"
             else:
                 # Continuar sin sitio web: usar dominio del email como contexto alternativo
                 email_contacto = str(row.get("CONTACTO_EMAIL", "") or "").strip()
@@ -805,7 +815,7 @@ def mostrar_tarjeta_cuenta(acct_name):
                         with st.spinner(f"Consultando {dominio}..."):
                             web_text = fetch_website_text(f"https://{dominio}")
                         if web_text:
-                            contexto += f"\nInformacion extraida de {dominio}:\n{web_text}"
+                            contexto += f"\nInformación extraída de {dominio}:\n{web_text}"
 
         df_hist = load_interacciones_cuenta(cuenta_id)
         if not df_hist.empty:
@@ -818,7 +828,7 @@ def mostrar_tarjeta_cuenta(acct_name):
         _pk = f"_pitch_{cuenta_id}"
         _ak = f"_sig_accion_{cuenta_id}"
 
-        if st.button("Generar Pitch y Siguiente Accion", key=f"pitch_gen_{cuenta_id}", type="primary"):
+        if st.button("Generar Pitch y Siguiente Acción", key=f"pitch_gen_{cuenta_id}", type="primary"):
             with st.spinner("Generando pitch personalizado con Cortex AI..."):
                 try:
                     conn_ai = get_connection()
@@ -833,10 +843,10 @@ def mostrar_tarjeta_cuenta(acct_name):
                         f"EGOS BI es una consultora especializada en Modern Data Stack: migracion a Snowflake, integracion de datos, "
                         f"transformacion, analytics y Data Cloud. Ayudamos a empresas a tomar decisiones en tiempo real con arquitecturas "
                         f"de datos modernas, escalables y confiables. "
-                        f"Genera un mensaje de seguimiento personalizado en espanol (5-6 oraciones) para esta cuenta. "
-                        f"CONTEXTO IMPORTANTE: Este lead asistio al Snowflake World Tour celebrado el ano pasado "
-                        f"en Ciudad de Mexico. NO asumas que te viste en persona con el contacto. "
-                        f"PERSONALIZACION POR CARGO: Si se incluye el cargo o rol del contacto, usa esa informacion para "
+                        f"Genera un mensaje de seguimiento personalizado en español (5-6 oraciones) para esta cuenta. "
+                        f"CONTEXTO IMPORTANTE: Este lead asistió al evento '{row.get('NOMBRE_EVENTO', 'Sin evento')}'. "
+                        f"NO asumas que te viste en persona con el contacto. "
+                        f"PERSONALIZACIÓN POR CARGO: Si se incluye el cargo o rol del contacto, usa esa información para "
                         f"personalizar el mensaje segun sus responsabilidades e intereses profesionales. Por ejemplo: "
                         f"si es Director de Datos o CDO, enfoca el mensaje en gobernanza de datos y toma de decisiones; "
                         f"si es CTO o VP de Tecnologia, habla de arquitectura escalable y modernizacion; "
@@ -845,7 +855,7 @@ def mostrar_tarjeta_cuenta(acct_name):
                         f"si es de Ingenieria de Datos, habla de pipelines eficientes y reduccion de complejidad operativa. "
                         f"El caso de uso que menciones debe hacer sentido con el rol del contacto. "
                         f"Inicia con un saludo a '{nombre_contacto}' diciendo que nos da mucho gusto que haya podido asistir "
-                        f"al Snowflake World Tour celebrado el ano pasado, que sabemos que en estos momentos su industria esta "
+                        f"al evento '{row.get('NOMBRE_EVENTO', 'Sin evento')}', que sabemos que en estos momentos su industria esta "
                         f"enfrentando ciertos retos (menciona uno relevante), y continua con: "
                         f"1) un caso de uso relevante para su industria Y para el rol del contacto, donde la combinacion de las "
                         f"capacidades de EGOS BI y Snowflake puede ayudarles a resolver ese reto o aprovechar una oportunidad, "
@@ -853,7 +863,7 @@ def mostrar_tarjeta_cuenta(acct_name):
                         f"NO menciones demos, demostraciones ni pruebas de concepto. Solo proponer una llamada breve para platicar. "
                         f"NUNCA uses la frase 'potencialidad de Snowflake' ni 'potencial de Snowflake'. "
                         f"Si mencionas potencial, di 'el potencial de tus datos'. El enfoque es el valor para el cliente, no el producto. "
-                        f"Si se incluye informacion del sitio web de la empresa, usala para personalizar el mensaje: "
+                        f"Si se incluye información del sitio web de la empresa, usala para personalizar el mensaje: "
                         f"menciona algo especifico de lo que hacen o a que se dedican segun su sitio web. "
                         f"Tono: profesional, cercano, de seguimiento. Datos:\n{contexto}"
                     )
@@ -862,7 +872,7 @@ def mostrar_tarjeta_cuenta(acct_name):
 
                     prompt_accion = (
                         f"Basandote en estos datos de un lead comercial, sugiere la SIGUIENTE ACCION concreta "
-                        f"que el vendedor debe tomar. Responde en espanol con UNA oracion directa y accionable. "
+                        f"que el vendedor debe tomar. Responde en español con UNA oración directa y accionable. "
                         f"NO sugieras demos ni demostraciones. Enfocate en agendar llamadas, enviar emails o compartir contenido. "
                         f"Ejemplo: 'Enviar email de seguimiento con caso de uso de Cortex AI para retail'. "
                         f"Datos:\n{contexto}"
@@ -902,7 +912,7 @@ def mostrar_tarjeta_cuenta(acct_name):
             if emails_contactos:
                 all_emails = ",".join(emails_contactos)
                 all_nombres = ", ".join(nombres_contactos)
-                subject = f"Seguimiento Snowflake World Tour 2025 - {acct_name}"
+                subject = f"Seguimiento {row.get('NOMBRE_EVENTO', '')} - {acct_name}"
                 pitch_clean = str(pitch).replace('\n', '\r\n')
                 mailto_url = make_mailto(all_emails, subject=subject, body=pitch_clean)
                 st.markdown(f"[Enviar pitch por email a {all_nombres}]({mailto_url})")
@@ -922,23 +932,23 @@ def mostrar_tarjeta_cuenta(acct_name):
                     disabled=ya_contactado
                 )
             pc1, pc2 = st.columns(2)
-            metodo_pitch = pc1.selectbox("Metodo:", ["EMAIL", "WHATSAPP", "LLAMADA", "LINKEDIN", "PRESENCIAL"], key=f"pc_met_{cuenta_id}")
+            metodo_pitch = pc1.selectbox("Método:", ["EMAIL", "WHATSAPP", "LLAMADA", "LINKEDIN", "PRESENCIAL"], key=f"pc_met_{cuenta_id}")
             resultado_pitch = pc2.selectbox("Resultado:", ["SIN_RESPUESTA", "POSITIVA", "NEGATIVA", "REPROGRAMADO"],
                                             index=0, key=f"pc_res_{cuenta_id}")
             notas_pitch = st.text_input("Notas:", value="Email de primer contacto enviado", key=f"pc_not_{cuenta_id}")
 
             sel_pitch = [cid for cid, checked in contacto_checks_pitch.items() if checked]
-            if st.button("Guardar accion y marcar contactados", key=f"pitch_save_{cuenta_id}", type="primary"):
+            if st.button("Guardar acción y marcar contactados", key=f"pitch_save_{cuenta_id}", type="primary"):
                 # Registrar interaccion IA
                 registrar_interaccion(cuenta_id, None, "IA_SUGERENCIA",
-                                      "Pitch generado + accion sugerida", "PENDIENTE",
+                                      "Pitch generado + acción sugerida", "PENDIENTE",
                                       str(siguiente_accion)[:500])
                 # Marcar contactos seleccionados
                 ok_count = 0
                 for cid in sel_pitch:
                     if marcar_contactado(cid, cuenta_id, metodo_pitch, resultado_pitch, notas_pitch):
                         ok_count += 1
-                msg = "Accion guardada en historial."
+                msg = "Acción guardada en historial."
                 if ok_count > 0:
                     msg += f" {ok_count} contacto(s) marcado(s) como contactado(s) via {metodo_pitch}."
                 # Limpiar pitch del session_state
@@ -958,12 +968,12 @@ def mostrar_tarjeta_cuenta(acct_name):
             st.caption("Para reactivarla, usa 'Editar Datos Cuenta' y cambia el estatus.")
         else:
             st.caption(f"Estatus actual: **{row['ESTATUS']}**")
-            motivo_descal_dialog = st.text_area("Motivo de descalificacion (obligatorio):",
+            motivo_descal_dialog = st.text_area("Motivo de descalificación (obligatorio):",
                 placeholder="Ej: No responde, no tiene presupuesto, empresa cerro, no es perfil Snowflake...",
                 key=f"descal_motivo_{cuenta_id}")
-            if st.button("Confirmar Descalificacion", key=f"descal_btn_{cuenta_id}", type="primary"):
+            if st.button("Confirmar Descalificación", key=f"descal_btn_{cuenta_id}", type="primary"):
                 if not motivo_descal_dialog.strip():
-                    st.error("Debes indicar el motivo de descalificacion.")
+                    st.error("Debes indicar el motivo de descalificación.")
                 else:
                     campos = {"ESTATUS": "DESCALIFICADO", "MOTIVO_DESCALIFICACION": motivo_descal_dialog.strip()}
                     if actualizar_cuenta(cuenta_id, campos):
@@ -979,7 +989,7 @@ def mostrar_tarjeta_cuenta(acct_name):
 # CARGAR DATOS
 # =============================================================
 
-df, df_casos = load_data()
+df, df_casos, df_eventos = load_data()
 
 # -- Notificacion toast tras accion exitosa en dialog --
 if "_toast_msg" in st.session_state:
@@ -991,6 +1001,11 @@ if "_toast_msg" in st.session_state:
 
 with st.sidebar:
     st.header("Filtros")
+
+    # -- Filtro de Evento (global) --
+    eventos_list = df_eventos["NOMBRE_EVENTO"].tolist() if not df_eventos.empty else []
+    sel_evento = st.selectbox("Evento", ["Todos"] + eventos_list)
+
     estatus_opts = ["PENDIENTE", "CONTACTADO", "EN_SEGUIMIENTO", "CALIFICADO", "OPORTUNIDAD", "DESCARTADO", "DESCALIFICADO"]
     default_estatus = [e for e in estatus_opts if e != "DESCALIFICADO"]
     sel_estatus = st.multiselect("Estatus Comercial", estatus_opts, default=default_estatus)
@@ -998,10 +1013,17 @@ with st.sidebar:
     sel_medio = st.selectbox("Medio de Contacto", medio_opts)
     industrias = sorted(df["INDUSTRIA_NOMBRE"].unique())
     sel_industrias = st.multiselect("Industria", industrias, default=industrias)
-    tamanos = ["Micro", "Pequena", "Mediana", "Grande", "Enterprise"]
-    sel_tamanos = st.multiselect("Tamano Empresa", tamanos, default=tamanos)
+    tamanos = ["Micro", "Pequeña", "Mediana", "Grande", "Enterprise"]
+    sel_tamanos = st.multiselect("Tamaño Empresa", tamanos, default=tamanos)
     paises = sorted(df["PAIS"].dropna().unique())
     sel_paises = st.multiselect("Pais", paises, default=paises)
+
+    # -- Filtros de enriquecimiento --
+    web_opts = ["Todos", "Con sitio web", "Sin sitio web"]
+    sel_web = st.selectbox("Sitio Web", web_opts)
+    linkedin_opts = ["Todos", "Con LinkedIn", "Sin LinkedIn"]
+    sel_linkedin = st.selectbox("LinkedIn Empresa", linkedin_opts)
+
     buscar = st.text_input("Buscar empresa", placeholder="Nombre de empresa...")
 
     # --- Herramientas de enriquecimiento ---
@@ -1066,7 +1088,16 @@ with st.sidebar:
 # APLICAR FILTROS
 # =============================================================
 
-dff = df[df["ESTATUS"].isin(sel_estatus)]
+# Guardar df completo para Vision General antes de filtrar por evento
+df_all = df.copy()
+
+# Filtro de evento
+if sel_evento != "Todos":
+    dff = df[df["NOMBRE_EVENTO"] == sel_evento].copy()
+else:
+    dff = df.copy()
+
+dff = dff[dff["ESTATUS"].isin(sel_estatus)]
 dff = dff[dff["INDUSTRIA_NOMBRE"].isin(sel_industrias)]
 dff = dff[dff["TAMANO_EMPRESA"].isin(sel_tamanos) | dff["TAMANO_EMPRESA"].isna()]
 dff = dff[dff["PAIS"].isin(sel_paises) | dff["PAIS"].isna()]
@@ -1086,6 +1117,18 @@ elif sel_medio == "Sin medio":
         (dff["CONTACTO_EMAIL"].isna() | (dff["CONTACTO_EMAIL"].astype(str).str.strip() == ""))
     ]
 
+# Filtros de sitio web y LinkedIn
+_nulos = {"", "nan", "none", "null"}
+if sel_web == "Con sitio web":
+    dff = dff[dff["SITIO_WEB"].astype(str).str.strip().str.lower().apply(lambda v: v not in _nulos)]
+elif sel_web == "Sin sitio web":
+    dff = dff[dff["SITIO_WEB"].astype(str).str.strip().str.lower().apply(lambda v: v in _nulos)]
+
+if sel_linkedin == "Con LinkedIn":
+    dff = dff[dff["LINKEDIN_EMPRESA"].astype(str).str.strip().str.lower().apply(lambda v: v not in _nulos)]
+elif sel_linkedin == "Sin LinkedIn":
+    dff = dff[dff["LINKEDIN_EMPRESA"].astype(str).str.strip().str.lower().apply(lambda v: v in _nulos)]
+
 if buscar:
     dff = dff[dff["ACCT_NAME"].str.contains(buscar, case=False, na=False)]
 
@@ -1093,8 +1136,9 @@ if buscar:
 # TITULO Y KPIs
 # =============================================================
 
-st.title("Leads Snowflake World Tour 2025")
-st.caption(f"DB_LEADS_SNOWFLAKE_WT25 | {len(dff)} de {len(df)} cuentas | Pedro Ulloa - EGOS BI")
+_evento_label = sel_evento if sel_evento != "Todos" else "Todos los eventos"
+st.title("EGOS BI Lead Manager")
+st.markdown(f"<span style='font-size:1.15rem;color:#888;'>{_evento_label} &nbsp;|&nbsp; {len(dff)} de {len(df)} cuentas &nbsp;|&nbsp; Pedro Ulloa - EGOS BI</span>", unsafe_allow_html=True)
 
 total = len(dff)
 contactadas = int(dff["CONTACTADO"].fillna(False).sum())
@@ -1104,9 +1148,9 @@ con_email = int(dff["CONTACTO_EMAIL"].notna().sum())
 total_contactos = int(dff["NUM_CONTACTOS"].fillna(0).sum())
 total_interacciones = int(dff["NUM_INTERACCIONES"].fillna(0).sum())
 
-# Helper para scroll automatico a seccion de Gestion de Leads
+# Helper para scroll automático a seccion de Gestión de Leads
 def _scroll_to_leads():
-    """Inyecta JS para scroll automatico al ancla de Gestion de Leads."""
+    """Inyecta JS para scroll automático al ancla de Gestión de Leads."""
     import time
     ts = int(time.time() * 1000)
     components.html(f"""
@@ -1116,7 +1160,7 @@ def _scroll_to_leads():
         function doScroll() {{
             const headers = doc.querySelectorAll('h2, h3, [data-testid="stSubheader"]');
             for (let h of headers) {{
-                if (h.textContent && h.textContent.indexOf('Gestion de Leads') !== -1) {{
+                if (h.textContent && h.textContent.indexOf('Gestión de Leads') !== -1) {{
                     h.scrollIntoView({{behavior: 'smooth', block: 'start'}});
                     return;
                 }}
@@ -1169,7 +1213,7 @@ with k7:
 # CALCULAR SCORES (necesario para ambas pestanas)
 # =============================================================
 
-tamano_score = {"Micro": 1, "Pequena": 2, "Mediana": 3, "Grande": 4, "Enterprise": 5}
+tamano_score = {"Micro": 1, "Pequeña": 2, "Mediana": 3, "Grande": 4, "Enterprise": 5}
 enriq_cols = ["SITIO_WEB", "UBICACION", "CONTACTO_NOMBRE", "LINKEDIN_EMPRESA", "CONTACTO_CARGO"]
 df_sc = dff.copy()
 df_sc["ENRIQ"] = df_sc[enriq_cols].apply(lambda r: sum(1 for v in r if v and str(v).strip()), axis=1)
@@ -1177,10 +1221,63 @@ df_sc["TAM_SC"] = df_sc["TAMANO_EMPRESA"].map(tamano_score).fillna(0).astype(int
 df_sc["SCORE"] = df_sc["ENRIQ"] + df_sc["TAM_SC"]
 
 # =============================================================
-# PESTANAS: GRAFICAS | TOP 10 | TOP 5 INDUSTRIA | INSIGHTS
+# PESTANAS: VISION GENERAL | GRAFICAS | TOP 10 | TOP 5 INDUSTRIA | INSIGHTS | CARGAR LEADS
 # =============================================================
 
-tab_graficas, tab_top10, tab_top5, tab_insights = st.tabs(["Graficas", "Top 10 Cuentas", "Top 5 por Industria", "Insights"])
+tab_vision, tab_graficas, tab_top10, tab_top5, tab_insights, tab_cargar = st.tabs(
+    ["Visión General", "Gráficas", "Top 10 Cuentas", "Top 5 por Industria", "Insights", "Cargar Leads"]
+)
+
+# -- TAB VISION GENERAL (cross-evento) --
+with tab_vision:
+    st.subheader("Vision General por Evento")
+    st.caption("Metricas consolidadas de todos los eventos — no afectada por el filtro de evento")
+
+    # Agrupar por evento usando df_all (sin filtro de evento)
+    if "NOMBRE_EVENTO" in df_all.columns and not df_all.empty:
+        ev_summary = df_all.groupby("NOMBRE_EVENTO").agg(
+            Cuentas=("CUENTA_ID", "count"),
+            Contactadas=("CONTACTADO", lambda x: int(x.fillna(False).sum())),
+            Con_Email=("CONTACTO_EMAIL", lambda x: int(x.notna().sum())),
+            Con_WhatsApp=("CONTACTO_WHATSAPP", lambda x: int(x.notna().sum())),
+            Con_Sitio_Web=("SITIO_WEB", lambda x: int(x.apply(lambda v: bool(v and str(v).strip() and str(v).strip() not in ("", "nan", "None"))).sum())),
+            Interacciones=("NUM_INTERACCIONES", lambda x: int(x.fillna(0).sum())),
+        ).reset_index()
+        ev_summary.columns = ["Evento", "Cuentas", "Contactadas", "Con Email", "Con WhatsApp", "Con Sitio Web", "Interacciones"]
+        ev_summary["Pendientes"] = ev_summary["Cuentas"] - ev_summary["Contactadas"]
+        ev_summary["% Avance"] = (ev_summary["Contactadas"] / ev_summary["Cuentas"] * 100).round(1)
+
+        # Metricas globales
+        _tot = ev_summary["Cuentas"].sum()
+        _cont = ev_summary["Contactadas"].sum()
+        gm1, gm2, gm3, gm4 = st.columns(4)
+        gm1.metric("Total Cuentas", _tot)
+        gm2.metric("Contactadas", _cont)
+        gm3.metric("Pendientes", _tot - _cont)
+        gm4.metric("Eventos", len(ev_summary))
+
+        st.dataframe(ev_summary, use_container_width=True, hide_index=True)
+
+        # Grafica comparativa
+        if len(ev_summary) > 1:
+            fig_ev = px.bar(ev_summary, x="Evento", y=["Contactadas", "Pendientes"],
+                            barmode="stack", text_auto=True,
+                            color_discrete_sequence=["#2ecc71", "#95a5a6"])
+            fig_ev.update_layout(height=350, margin=dict(l=0, r=0, t=30, b=0),
+                                 legend_title_text="")
+            st.plotly_chart(fig_ev, use_container_width=True)
+
+        # Pipeline por evento
+        if len(ev_summary) >= 1:
+            st.subheader("Pipeline por Evento")
+            ev_pipe = df_all.groupby(["NOMBRE_EVENTO", "ESTATUS"]).size().reset_index(name="Cuentas")
+            fig_pipe_ev = px.bar(ev_pipe, x="ESTATUS", y="Cuentas", color="NOMBRE_EVENTO",
+                                 barmode="group", text_auto=True)
+            fig_pipe_ev.update_layout(height=350, margin=dict(l=0, r=0, t=30, b=0),
+                                      legend_title_text="Evento")
+            st.plotly_chart(fig_pipe_ev, use_container_width=True)
+    else:
+        st.info("No hay datos de eventos disponibles.")
 
 # -- TAB GRAFICAS --
 with tab_graficas:
@@ -1238,19 +1335,19 @@ with tab_graficas:
 
     with col3:
         with st.container(border=True):
-            st.subheader("Tamano de Empresa")
-            tamano_order = ["Micro", "Pequena", "Mediana", "Grande", "Enterprise"]
+            st.subheader("Tamaño de Empresa")
+            tamano_order = ["Micro", "Pequeña", "Mediana", "Grande", "Enterprise"]
             tam_counts = dff["TAMANO_EMPRESA"].value_counts().reindex(tamano_order).dropna().reset_index()
-            tam_counts.columns = ["Tamano", "Cuentas"]
-            fig_tam = px.bar(tam_counts, x="Tamano", y="Cuentas", text="Cuentas",
-                             color="Tamano", color_discrete_sequence=px.colors.sequential.Viridis)
+            tam_counts.columns = ["Tamaño", "Cuentas"]
+            fig_tam = px.bar(tam_counts, x="Tamaño", y="Cuentas", text="Cuentas",
+                             color="Tamaño", color_discrete_sequence=px.colors.sequential.Viridis)
             fig_tam.update_layout(showlegend=False, height=350, margin=dict(l=0, r=0, t=10, b=0))
             fig_tam.update_traces(textposition="outside")
             st.plotly_chart(fig_tam, width="stretch")
 
     with col4:
         with st.container(border=True):
-            st.subheader("Distribucion Geografica (Top 10)")
+            st.subheader("Distribución Geográfica (Top 10)")
             geo = dff["PAIS"].dropna().value_counts().head(10).reset_index()
             geo.columns = ["Pais", "Cuentas"]
             fig_geo = px.pie(geo, values="Cuentas", names="Pais",
@@ -1263,7 +1360,7 @@ with tab_graficas:
         st.subheader("Actividad de Interacciones")
         df_inter = load_all_interacciones()
         if df_inter.empty:
-            st.info("No hay interacciones registradas aun.")
+            st.info("No hay interacciones registradas aún.")
         else:
             df_act = df_inter.copy()
             df_act["FECHA"] = pd.to_datetime(df_act["FECHA"], errors="coerce")
@@ -1290,7 +1387,7 @@ with tab_graficas:
 with tab_top10:
 
     st.subheader("Top 10 Cuentas de Mayor Interes")
-    st.caption("Score combinado: datos obtenidos (0-5) + tamano empresa (0-5) | Click en una fila para ver detalle")
+    st.caption("Score combinado: datos obtenidos (0-5) + tamaño empresa (0-5) | Click en una fila para ver detalle")
 
     top10 = df_sc.nlargest(10, ["SCORE", "TAM_SC", "ENRIQ"])
 
@@ -1299,12 +1396,12 @@ with tab_top10:
         with st.container(border=True):
             t10d = top10[["ACCT_NAME", "INDUSTRIA_NOMBRE", "TAMANO_EMPRESA",
                            "ENRIQ", "TAM_SC", "SCORE", "CONTACTO_NOMBRE", "ESTATUS"]].copy()
-            t10d.columns = ["Empresa", "Industria", "Tamano", "Datos (0-5)", "Tamano (0-5)",
+            t10d.columns = ["Empresa", "Industria", "Tamaño", "Datos (0-5)", "Tamaño (0-5)",
                             "Score", "Contacto", "Estatus"]
             t10d = t10d.fillna("")
             # Header
             hc = st.columns([2.5, 1.5, 1, 0.8, 0.8, 0.7, 1.5, 1.2])
-            headers = ["Empresa", "Industria", "Tamano", "Datos", "Tam.", "Score", "Contacto", "Estatus"]
+            headers = ["Empresa", "Industria", "Tamaño", "Datos", "Tam.", "Score", "Contacto", "Estatus"]
             for col, h in zip(hc, headers):
                 col.markdown(f"**{h}**")
             # Filas con empresa como link
@@ -1315,17 +1412,17 @@ with tab_top10:
                         st.session_state["_open_cuenta"] = rw["Empresa"]
                         st.rerun()
                 rc[1].write(rw["Industria"])
-                rc[2].write(rw["Tamano"])
+                rc[2].write(rw["Tamaño"])
                 rc[3].write(str(rw["Datos (0-5)"]))
-                rc[4].write(str(rw["Tamano (0-5)"]))
+                rc[4].write(str(rw["Tamaño (0-5)"]))
                 rc[5].write(str(rw["Score"]))
                 rc[6].write(rw["Contacto"])
                 rc[7].write(rw["Estatus"])
 
     with ct2:
         with st.container(border=True):
-            st.markdown("**Composicion del Score**")
-            fig_sc = px.bar(t10d, y="Empresa", x=["Datos (0-5)", "Tamano (0-5)"],
+            st.markdown("**Composición del Score**")
+            fig_sc = px.bar(t10d, y="Empresa", x=["Datos (0-5)", "Tamaño (0-5)"],
                             orientation="h", barmode="stack",
                             color_discrete_sequence=["#3498db", "#2ecc71"])
             fig_sc.update_layout(height=400, margin=dict(l=0, r=0, t=10, b=0),
@@ -1336,7 +1433,7 @@ with tab_top10:
 with tab_top5:
 
     st.subheader("Top 5 Cuentas por Industria")
-    st.caption("Score combinado: datos obtenidos (0-5) + tamano empresa (0-5)")
+    st.caption("Score combinado: datos obtenidos (0-5) + tamaño empresa (0-5)")
 
     industrias_disponibles = sorted(dff["INDUSTRIA_NOMBRE"].unique())
     ti1, ti2 = st.columns([1, 2])
@@ -1346,10 +1443,10 @@ with tab_top5:
         df_ind = df_sc[df_sc["INDUSTRIA_NOMBRE"] == sel_industria_top5].nlargest(5, ["SCORE", "TAM_SC", "ENRIQ"])
         if not df_ind.empty:
             t5d = df_ind[["ACCT_NAME", "TAMANO_EMPRESA", "ENRIQ", "TAM_SC", "SCORE", "CONTACTO_NOMBRE", "ESTATUS"]].copy()
-            t5d.columns = ["Empresa", "Tamano", "Datos (0-5)", "Tamano (0-5)", "Score", "Contacto", "Estatus"]
+            t5d.columns = ["Empresa", "Tamaño", "Datos (0-5)", "Tamaño (0-5)", "Score", "Contacto", "Estatus"]
             t5d = t5d.fillna("")
             with st.container(border=True):
-                fig_t5 = px.bar(t5d, y="Empresa", x=["Datos (0-5)", "Tamano (0-5)"],
+                fig_t5 = px.bar(t5d, y="Empresa", x=["Datos (0-5)", "Tamaño (0-5)"],
                                 orientation="h", barmode="stack",
                                 color_discrete_sequence=["#3498db", "#2ecc71"],
                                 title=f"Top 5 - {sel_industria_top5}")
@@ -1398,12 +1495,279 @@ with tab_insights:
                         st.markdown("**Casos de Uso Snowflake**")
                         st.write(str(caso["CASOS_USO_SNOWFLAKE"])[:1500])
 
+# -- TAB CARGAR LEADS --
+with tab_cargar:
+    st.subheader("Cargar Leads desde CSV")
+    st.caption("Sube un archivo CSV con leads de un evento. Mapea las columnas y carga los datos a Snowflake.")
+
+    # Template CSV descargable
+    _template_csv = "Empresa,Nombre,Apellidos,Email,Cargo,WhatsApp,Industria\nEjemplo S.A.,Juan,Perez,juan@ejemplo.com,Director de TI,5551234567,Tecnologia\n"
+    st.download_button("Descargar template CSV", data=_template_csv, file_name="template_leads.csv", mime="text/csv", key="_dl_template")
+
+    # 1. Seleccionar o crear evento
+    _ev_opts = df_eventos["NOMBRE_EVENTO"].tolist() if not df_eventos.empty else []
+    _ev_choice = st.radio("Evento destino:", ["Evento existente", "Crear nuevo evento"], horizontal=True, key="_ev_choice")
+
+    evento_id_carga = None
+    if _ev_choice == "Evento existente" and _ev_opts:
+        _ev_sel = st.selectbox("Selecciona evento:", _ev_opts, key="_ev_sel_carga")
+        _ev_row = df_eventos[df_eventos["NOMBRE_EVENTO"] == _ev_sel]
+        if not _ev_row.empty:
+            evento_id_carga = int(_ev_row.iloc[0]["EVENTO_ID"])
+    elif _ev_choice == "Crear nuevo evento":
+        nc1, nc2 = st.columns(2)
+        nuevo_nombre = nc1.text_input("Nombre del evento:", key="_nuevo_ev_nombre", placeholder="Ej: Data Summit 2026")
+        nueva_fecha = nc2.date_input("Fecha del evento:", key="_nuevo_ev_fecha")
+        nueva_desc = st.text_input("Descripción (opcional):", key="_nuevo_ev_desc")
+    elif _ev_choice == "Evento existente" and not _ev_opts:
+        st.warning("No hay eventos registrados. Crea uno nuevo.")
+
+    # 2. Subir CSV
+    uploaded = st.file_uploader("Sube tu archivo CSV:", type=["csv"], key="_csv_upload")
+
+    if uploaded is not None:
+        try:
+            df_csv = pd.read_csv(uploaded)
+        except Exception as e:
+            st.error(f"Error al leer CSV: {e}")
+            df_csv = None
+
+        if df_csv is not None and not df_csv.empty:
+            st.success(f"Archivo cargado: {len(df_csv)} filas, {len(df_csv.columns)} columnas")
+            st.dataframe(df_csv.head(5), use_container_width=True, hide_index=True)
+
+            # 3. Mapeo de columnas
+            st.markdown("**Mapeo de columnas**")
+            st.caption("Selecciona qué columna del CSV corresponde a cada campo del sistema.")
+            csv_cols = ["— No mapear —"] + list(df_csv.columns)
+
+            CAMPOS_SISTEMA = [
+                ("Nombre", "NOMBRE"), ("Apellidos", "APELLIDOS"), ("Email", "EMAIL"),
+                ("Empresa", "EMPRESA"), ("Cargo", "CARGO_CONTEXTO"),
+                ("WhatsApp", "WHATSAPP"), ("Industria", "INDUSTRIA")
+            ]
+            mapeo = {}
+            mc_cols = st.columns(len(CAMPOS_SISTEMA))
+            for i, (label, campo) in enumerate(CAMPOS_SISTEMA):
+                # Intentar auto-detectar por nombre similar
+                default_idx = 0
+                for j, cc in enumerate(csv_cols):
+                    if cc != "— No mapear —" and (cc.upper() == campo or label.upper() in cc.upper()):
+                        default_idx = j
+                        break
+                with mc_cols[i]:
+                    sel = st.selectbox(label, csv_cols, index=default_idx, key=f"_map_{campo}")
+                    if sel != "— No mapear —":
+                        mapeo[campo] = sel
+
+            # Validar mapeo minimo
+            if "EMPRESA" not in mapeo:
+                st.warning("El campo **Empresa** es obligatorio para cargar leads.")
+            else:
+                # 4. Boton de carga
+                if st.button("Cargar leads a Snowflake", type="primary", key="_btn_cargar"):
+                    # Crear evento si es nuevo
+                    if _ev_choice == "Crear nuevo evento":
+                        if not nuevo_nombre or not nuevo_nombre.strip():
+                            st.error("Ingresa un nombre para el nuevo evento.")
+                            st.stop()
+                        conn_ev = get_connection()
+                        cur_ev = conn_ev.cursor()
+                        try:
+                            cur_ev.execute(f"""
+                                INSERT INTO {DB}.CORE.DIM_EVENTOS (NOMBRE_EVENTO, FECHA_EVENTO, DESCRIPCION)
+                                VALUES (%s, %s, %s)
+                            """, (nuevo_nombre.strip(), str(nueva_fecha), nueva_desc.strip() if nueva_desc else None))
+                            cur_ev.execute("SELECT MAX(EVENTO_ID) FROM " + DB + ".CORE.DIM_EVENTOS")
+                            evento_id_carga = int(cur_ev.fetchone()[0])
+                            conn_ev.commit()
+                        finally:
+                            cur_ev.close()
+                            conn_ev.close()
+
+                    if evento_id_carga is None:
+                        st.error("Selecciona o crea un evento antes de cargar.")
+                        st.stop()
+
+                    # Procesar filas del CSV
+                    conn_carga = get_connection()
+                    cur_carga = conn_carga.cursor()
+                    cuentas_nuevas = 0
+                    contactos_agregados = 0
+                    errores = 0
+                    progress_carga = st.progress(0, text="Cargando leads...")
+
+                    try:
+                        for idx, row_csv in df_csv.iterrows():
+                            progress_carga.progress((idx + 1) / len(df_csv),
+                                                    text=f"Procesando fila {idx + 1} de {len(df_csv)}...")
+                            empresa = str(row_csv.get(mapeo.get("EMPRESA", ""), "") or "").strip()
+                            if not empresa:
+                                errores += 1
+                                continue
+
+                            nombre = str(row_csv.get(mapeo.get("NOMBRE", ""), "") or "").strip()
+                            apellidos = str(row_csv.get(mapeo.get("APELLIDOS", ""), "") or "").strip()
+                            email = str(row_csv.get(mapeo.get("EMAIL", ""), "") or "").strip()
+                            cargo = str(row_csv.get(mapeo.get("CARGO_CONTEXTO", ""), "") or "").strip()
+                            whatsapp = str(row_csv.get(mapeo.get("WHATSAPP", ""), "") or "").strip()
+                            industria = str(row_csv.get(mapeo.get("INDUSTRIA", ""), "") or "").strip()
+
+                            # Limpiar valores "nan" de pandas
+                            nombre = "" if nombre.lower() in ("nan", "none", "null") else nombre
+                            apellidos = "" if apellidos.lower() in ("nan", "none", "null") else apellidos
+                            email = "" if email.lower() in ("nan", "none", "null") else email
+                            cargo = "" if cargo.lower() in ("nan", "none", "null") else cargo
+                            whatsapp = "" if whatsapp.lower() in ("nan", "none", "null") else whatsapp
+                            industria = "" if industria.lower() in ("nan", "none", "null") else industria
+
+                            # Buscar si la cuenta ya existe (por nombre de empresa, case-insensitive)
+                            cur_carga.execute(f"""
+                                SELECT CUENTA_ID FROM {DB}.CORE.DIM_CUENTAS
+                                WHERE UPPER(TRIM(ACCT_NAME)) = %s
+                            """, (empresa.upper(),))
+                            cuenta_row = cur_carga.fetchone()
+
+                            if cuenta_row:
+                                cuenta_id = int(cuenta_row[0])
+                            else:
+                                # Buscar o crear industria
+                                industria_id = None
+                                if industria:
+                                    cur_carga.execute(f"""
+                                        SELECT INDUSTRIA_ID FROM {DB}.CORE.DIM_INDUSTRIAS
+                                        WHERE UPPER(TRIM(INDUSTRIA_NOMBRE)) = %s
+                                    """, (industria.upper(),))
+                                    ind_row = cur_carga.fetchone()
+                                    if ind_row:
+                                        industria_id = int(ind_row[0])
+                                    else:
+                                        cur_carga.execute(f"""
+                                            INSERT INTO {DB}.CORE.DIM_INDUSTRIAS (INDUSTRIA_NOMBRE)
+                                            VALUES (%s)
+                                        """, (industria,))
+                                        cur_carga.execute(f"SELECT MAX(INDUSTRIA_ID) FROM {DB}.CORE.DIM_INDUSTRIAS")
+                                        industria_id = int(cur_carga.fetchone()[0])
+                                if not industria_id:
+                                    # Asignar industria "Sin clasificar" o la primera disponible
+                                    cur_carga.execute(f"SELECT MIN(INDUSTRIA_ID) FROM {DB}.CORE.DIM_INDUSTRIAS")
+                                    industria_id = int(cur_carga.fetchone()[0])
+
+                                # Crear cuenta nueva
+                                cur_carga.execute(f"""
+                                    INSERT INTO {DB}.CORE.DIM_CUENTAS (ACCT_NAME, INDUSTRIA_ID, EVENTO_ID, FUENTE_LEAD)
+                                    VALUES (%s, %s, %s, %s)
+                                """, (empresa, industria_id, evento_id_carga, f"EVENTO_{evento_id_carga}"))
+                                cur_carga.execute(f"SELECT MAX(CUENTA_ID) FROM {DB}.CORE.DIM_CUENTAS")
+                                cuenta_id = int(cur_carga.fetchone()[0])
+                                cuentas_nuevas += 1
+
+                            # Agregar contacto si tiene al menos nombre o email
+                            if nombre or email:
+                                nombre_completo = f"{nombre} {apellidos}".strip() if nombre else ""
+                                cur_carga.execute(f"""
+                                    INSERT INTO {DB}.CORE.DIM_CONTACTOS
+                                    (CUENTA_ID, PRIMER_NOMBRE, APELLIDO, NOMBRE_COMPLETO, CARGO, EMAIL, WHATSAPP, FUENTE, ES_PRINCIPAL)
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                """, (cuenta_id, nombre or None, apellidos or None,
+                                      nombre_completo or None, cargo or None,
+                                      email or None, whatsapp or None,
+                                      f"EVENTO_{evento_id_carga}", True))
+                                contactos_agregados += 1
+
+                        conn_carga.commit()
+                    except Exception as e:
+                        st.error(f"Error durante la carga: {e}")
+                        errores += 1
+                    finally:
+                        cur_carga.close()
+                        conn_carga.close()
+
+                    progress_carga.empty()
+                    st.cache_data.clear()
+                    st.success(
+                        f"Carga completada: {cuentas_nuevas} cuentas nuevas, "
+                        f"{contactos_agregados} contactos agregados, "
+                        f"{errores} filas con error."
+                    )
+                    if cuentas_nuevas > 0 or contactos_agregados > 0:
+                        st.rerun()
+
+    # ---- Seccion: Eliminar evento ----
+    st.divider()
+    with st.expander("Eliminar evento y sus datos", expanded=False):
+        st.warning("Esta acción eliminará el evento seleccionado y **todas** las cuentas, contactos e interacciones asociadas. No se puede deshacer.")
+        _ev_del_opts = df_eventos["NOMBRE_EVENTO"].tolist() if not df_eventos.empty else []
+        if _ev_del_opts:
+            _ev_del_sel = st.selectbox("Evento a eliminar:", _ev_del_opts, key="_ev_del_sel")
+            _ev_del_row = df_eventos[df_eventos["NOMBRE_EVENTO"] == _ev_del_sel]
+            _ev_del_id = int(_ev_del_row.iloc[0]["EVENTO_ID"]) if not _ev_del_row.empty else None
+
+            # Mostrar resumen de lo que se va a borrar
+            if _ev_del_id is not None:
+                _n_ctas = int((df_all["EVENTO_ID"] == _ev_del_id).sum()) if "EVENTO_ID" in df_all.columns else 0
+                st.info(f"El evento **{_ev_del_sel}** tiene aproximadamente **{_n_ctas}** cuentas asociadas.")
+
+            _confirm_txt = st.text_input("Escribe ELIMINAR para confirmar:", key="_del_confirm", placeholder="ELIMINAR")
+            if st.button("Eliminar evento", type="primary", key="_btn_del_evento"):
+                if _confirm_txt != "ELIMINAR":
+                    st.error("Escribe ELIMINAR (en mayusculas) para confirmar la eliminación.")
+                elif _ev_del_id is None:
+                    st.error("No se pudo identificar el evento.")
+                else:
+                    conn_del = get_connection()
+                    cur_del = conn_del.cursor()
+                    try:
+                        # 1. Borrar interacciones de cuentas del evento
+                        cur_del.execute(f"""
+                            DELETE FROM {DB}.CORE.FACT_INTERACCIONES
+                            WHERE CUENTA_ID IN (
+                                SELECT CUENTA_ID FROM {DB}.CORE.DIM_CUENTAS WHERE EVENTO_ID = %s
+                            )
+                        """, (_ev_del_id,))
+                        n_inter = cur_del.rowcount
+
+                        # 2. Borrar contactos de cuentas del evento
+                        cur_del.execute(f"""
+                            DELETE FROM {DB}.CORE.DIM_CONTACTOS
+                            WHERE CUENTA_ID IN (
+                                SELECT CUENTA_ID FROM {DB}.CORE.DIM_CUENTAS WHERE EVENTO_ID = %s
+                            )
+                        """, (_ev_del_id,))
+                        n_cont = cur_del.rowcount
+
+                        # 3. Borrar cuentas del evento
+                        cur_del.execute(f"""
+                            DELETE FROM {DB}.CORE.DIM_CUENTAS WHERE EVENTO_ID = %s
+                        """, (_ev_del_id,))
+                        n_ctas = cur_del.rowcount
+
+                        # 4. Borrar el evento
+                        cur_del.execute(f"""
+                            DELETE FROM {DB}.CORE.DIM_EVENTOS WHERE EVENTO_ID = %s
+                        """, (_ev_del_id,))
+
+                        conn_del.commit()
+                        st.cache_data.clear()
+                        st.success(
+                            f"Evento **{_ev_del_sel}** eliminado. "
+                            f"Se borraron {n_ctas} cuentas, {n_cont} contactos y {n_inter} interacciones."
+                        )
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al eliminar: {e}")
+                    finally:
+                        cur_del.close()
+                        conn_del.close()
+        else:
+            st.info("No hay eventos para eliminar.")
+
 # =============================================================
 # GESTION DE LEADS (siempre visible, debajo de las pestanas)
 # =============================================================
 
 st.divider()
-# Ancla HTML para scroll automatico desde KPIs / graficas
+# Ancla HTML para scroll automático desde KPIs / graficas
 st.markdown('<div id="gestion-leads"></div>', unsafe_allow_html=True)
 
 # Leer filtro temporal si existe
@@ -1425,7 +1789,7 @@ if _kpi_f:
             st.rerun()
         df_inter_all = load_all_interacciones()
         if df_inter_all.empty:
-            st.info("No hay interacciones registradas aun.")
+            st.info("No hay interacciones registradas aún.")
         else:
             st.dataframe(df_inter_all, use_container_width=True, hide_index=True)
         st.stop()
@@ -1451,13 +1815,13 @@ if _kpi_f:
         _filter_label = f"Industria: {fvalor}"
 
 if _filter_label:
-    st.subheader(f"Gestion de Leads — {_filter_label}")
+    st.subheader(f"Gestión de Leads — {_filter_label}")
     if st.button("Limpiar filtro", key="limpiar_filtro_leads", type="secondary"):
         st.session_state.pop("_kpi_filter", None)
         st.session_state.pop("_kpi_filter_prev", None)
         st.rerun()
 else:
-    st.subheader("Gestion de Leads")
+    st.subheader("Gestión de Leads")
 
 st.caption("Click en el nombre de la empresa para ver detalle | Usa la seccion inferior para marcar contactado")
 
@@ -1494,7 +1858,7 @@ if _kpi_f:
     elif ftipo == "industria":
         df_leads = df_leads[df_leads["INDUSTRIA_NOMBRE"] == fvalor]
     # "total" y "contactos" no filtran, muestran todo
-    # Resetear pagina solo cuando el filtro KPI es nuevo (no en cada rerun)
+    # Resetear página solo cuando el filtro KPI es nuevo (no en cada rerun)
     if st.session_state.get("_kpi_filter_prev") != _kpi_f:
         st.session_state["leads_page"] = 0
         st.session_state["_kpi_filter_prev"] = _kpi_f
@@ -1564,4 +1928,4 @@ if "_open_cuenta" in st.session_state and st.session_state["_open_cuenta"]:
 # =============================================================
 
 st.divider()
-st.caption("Dashboard Leads Snowflake World Tour 2025 v6 | DB_LEADS_SNOWFLAKE_WT25 | EGOS BI + Cortex AI")
+st.caption("EGOS BI Lead Manager v7 | DB_LEADS_SNOWFLAKE_WT25 | EGOS BI + Cortex AI")
