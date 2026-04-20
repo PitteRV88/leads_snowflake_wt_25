@@ -1745,8 +1745,11 @@ with tab_cargar:
                             cur_ev.execute(f"""
                                 INSERT INTO {DB}.CORE.DIM_EVENTOS (NOMBRE_EVENTO, FECHA_EVENTO, DESCRIPCION)
                                 VALUES (%s, %s, %s)
-                                RETURNING EVENTO_ID
                             """, (nuevo_nombre.strip(), str(nueva_fecha), nueva_desc.strip() if nueva_desc else None))
+                            cur_ev.execute(f"""
+                                SELECT EVENTO_ID FROM {DB}.CORE.DIM_EVENTOS
+                                WHERE UPPER(TRIM(NOMBRE_EVENTO)) = %s
+                            """, (nuevo_nombre.strip().upper(),))
                             evento_id_carga = int(cur_ev.fetchone()[0])
                             conn_ev.commit()
                         finally:
@@ -1830,8 +1833,11 @@ with tab_cargar:
                                         cur_fila.execute(f"""
                                             INSERT INTO {DB}.CORE.DIM_INDUSTRIAS (INDUSTRIA_NOMBRE)
                                             VALUES (%s)
-                                            RETURNING INDUSTRIA_ID
                                         """, (industria,))
+                                        cur_fila.execute(f"""
+                                            SELECT INDUSTRIA_ID FROM {DB}.CORE.DIM_INDUSTRIAS
+                                            WHERE UPPER(TRIM(INDUSTRIA_NOMBRE)) = %s
+                                        """, (industria.upper(),))
                                         industria_id = int(cur_fila.fetchone()[0])
 
                                 if not industria_id:
@@ -1844,8 +1850,11 @@ with tab_cargar:
                                 cur_fila.execute(f"""
                                     INSERT INTO {DB}.CORE.DIM_CUENTAS (ACCT_NAME, INDUSTRIA_ID, EVENTO_ID, FUENTE_LEAD)
                                     VALUES (%s, %s, %s, %s)
-                                    RETURNING CUENTA_ID
                                 """, (empresa, industria_id, evento_id_carga, f"EVENTO_{evento_id_carga}"))
+                                cur_fila.execute(f"""
+                                    SELECT CUENTA_ID FROM {DB}.CORE.DIM_CUENTAS
+                                    WHERE UPPER(TRIM(ACCT_NAME)) = %s AND EVENTO_ID = %s
+                                """, (empresa.upper(), evento_id_carga))
                                 cuenta_id = int(cur_fila.fetchone()[0])
                                 cuentas_nuevas += 1
 
