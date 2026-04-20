@@ -1740,6 +1740,8 @@ with tab_cargar:
                                         industria_id = int(cur_carga.fetchone()[0])
                                 if not industria_id:
                                     # Auto-clasificar industria con Cortex AI usando empresa + email
+                                    # IMPORTANTE: Usar cursor separado para Cortex AI para no
+                                    # interferir con el cursor principal de carga (cur_carga)
                                     _dominio = email.split("@")[1] if email and "@" in email else ""
                                     _prompt_ind = (
                                         "Classify the following company into exactly ONE of these industries. "
@@ -1755,22 +1757,24 @@ with tab_cargar:
                                         f"Email domain: {_dominio}\n\n"
                                         "Industry:"
                                     )
+                                    cur_ai = conn_carga.cursor()
                                     try:
-                                        cur_carga.execute(
+                                        cur_ai.execute(
                                             "SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.1-8b', %s)",
                                             (_prompt_ind,)
                                         )
-                                        _ai_ind = cur_carga.fetchone()[0].strip().strip('"').strip("'").strip()
-                                        # Buscar coincidencia en DIM_INDUSTRIAS
-                                        cur_carga.execute(f"""
+                                        _ai_ind = cur_ai.fetchone()[0].strip().strip('"').strip("'").strip()
+                                        cur_ai.execute(f"""
                                             SELECT INDUSTRIA_ID FROM {DB}.CORE.DIM_INDUSTRIAS
                                             WHERE UPPER(TRIM(INDUSTRIA_NOMBRE)) = %s
                                         """, (_ai_ind.upper(),))
-                                        _ai_row = cur_carga.fetchone()
+                                        _ai_row = cur_ai.fetchone()
                                         if _ai_row:
                                             industria_id = int(_ai_row[0])
                                     except Exception:
                                         pass  # Si falla Cortex, cae al fallback abajo
+                                    finally:
+                                        cur_ai.close()
 
                                     if not industria_id:
                                         # Fallback: "Sin Clasificar"
