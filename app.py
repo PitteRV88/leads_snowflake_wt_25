@@ -1758,43 +1758,60 @@ with tab_cargar:
                         st.stop()
 
                     # Procesar filas del CSV
-                    conn_carga = get_connection()
-                    cur_carga = conn_carga.cursor()
+                    # IMPORTANTE: Cada fila usa su propia conexión+cursor para
+                    # aislamiento total. Si una fila falla, las demás no se ven
+                    # afectadas. Cortex AI usa conexión completamente separada.
                     cuentas_nuevas = 0
                     contactos_agregados = 0
                     errores = 0
+                    detalle_errores = []
                     progress_carga = st.progress(0, text="Cargando leads...")
 
+                    # Pre-cargar ID de "Sin Clasificar" una sola vez
+                    _conn_pre = get_connection()
+                    _cur_pre = _conn_pre.cursor()
                     try:
-                        for idx, row_csv in df_csv.iterrows():
-                            progress_carga.progress((idx + 1) / len(df_csv),
-                                                    text=f"Procesando fila {idx + 1} de {len(df_csv)}...")
-                            empresa = str(row_csv.get(mapeo.get("EMPRESA", ""), "") or "").strip()
-                            if not empresa:
-                                errores += 1
-                                continue
+                        _cur_pre.execute(f"""
+                            SELECT MIN(INDUSTRIA_ID) FROM {DB}.CORE.DIM_INDUSTRIAS
+                        """)
+                        _fallback_ind_id = int(_cur_pre.fetchone()[0])
+                    finally:
+                        _cur_pre.close()
+                        _conn_pre.close()
 
-                            nombre = str(row_csv.get(mapeo.get("NOMBRE", ""), "") or "").strip()
-                            apellidos = str(row_csv.get(mapeo.get("APELLIDOS", ""), "") or "").strip()
-                            email = str(row_csv.get(mapeo.get("EMAIL", ""), "") or "").strip()
-                            cargo = str(row_csv.get(mapeo.get("CARGO_CONTEXTO", ""), "") or "").strip()
-                            whatsapp = str(row_csv.get(mapeo.get("WHATSAPP", ""), "") or "").strip()
-                            industria = str(row_csv.get(mapeo.get("INDUSTRIA", ""), "") or "").strip()
+                    for idx, row_csv in df_csv.iterrows():
+                        progress_carga.progress((idx + 1) / len(df_csv),
+                                                text=f"Procesando fila {idx + 1} de {len(df_csv)}...")
+                        empresa = str(row_csv.get(mapeo.get("EMPRESA", ""), "") or "").strip()
+                        if not empresa:
+                            errores += 1
+                            continue
 
-                            # Limpiar valores "nan" de pandas
-                            nombre = "" if nombre.lower() in ("nan", "none", "null") else nombre
-                            apellidos = "" if apellidos.lower() in ("nan", "none", "null") else apellidos
-                            email = "" if email.lower() in ("nan", "none", "null") else email
-                            cargo = "" if cargo.lower() in ("nan", "none", "null") else cargo
-                            whatsapp = "" if whatsapp.lower() in ("nan", "none", "null") else whatsapp
-                            industria = "" if industria.lower() in ("nan", "none", "null") else industria
+                        nombre = str(row_csv.get(mapeo.get("NOMBRE", ""), "") or "").strip()
+                        apellidos = str(row_csv.get(mapeo.get("APELLIDOS", ""), "") or "").strip()
+                        email = str(row_csv.get(mapeo.get("EMAIL", ""), "") or "").strip()
+                        cargo = str(row_csv.get(mapeo.get("CARGO_CONTEXTO", ""), "") or "").strip()
+                        whatsapp = str(row_csv.get(mapeo.get("WHATSAPP", ""), "") or "").strip()
+                        industria = str(row_csv.get(mapeo.get("INDUSTRIA", ""), "") or "").strip()
 
-                            # Buscar si la cuenta ya existe (por nombre de empresa, case-insensitive)
-                            cur_carga.execute(f"""
+                        # Limpiar valores "nan" de pandas
+                        nombre = "" if nombre.lower() in ("nan", "none", "null") else nombre
+                        apellidos = "" if apellidos.lower() in ("nan", "none", "null") else apellidos
+                        email = "" if email.lower() in ("nan", "none", "null") else email
+                        cargo = "" if cargo.lower() in ("nan", "none", "null") else cargo
+                        whatsapp = "" if whatsapp.lower() in ("nan", "none", "null") else whatsapp
+                        industria = "" if industria.lower() in ("nan", "none", "null") else industria
+
+                        # Conexión dedicada para esta fila (aislamiento total)
+                        conn_fila = get_connection()
+                        cur_fila = conn_fila.cursor()
+                        try:
+                            # Buscar si la cuenta ya existe
+                            cur_fila.execute(f"""
                                 SELECT CUENTA_ID FROM {DB}.CORE.DIM_CUENTAS
                                 WHERE UPPER(TRIM(ACCT_NAME)) = %s
                             """, (empresa.upper(),))
-                            cuenta_row = cur_carga.fetchone()
+                            cuenta_row = cur_fila.fetchone()
 
                             if cuenta_row:
                                 cuenta_id = int(cuenta_row[0])
@@ -1802,24 +1819,23 @@ with tab_cargar:
                                 # Buscar o crear industria
                                 industria_id = None
                                 if industria:
-                                    cur_carga.execute(f"""
+                                    cur_fila.execute(f"""
                                         SELECT INDUSTRIA_ID FROM {DB}.CORE.DIM_INDUSTRIAS
                                         WHERE UPPER(TRIM(INDUSTRIA_NOMBRE)) = %s
                                     """, (industria.upper(),))
-                                    ind_row = cur_carga.fetchone()
+                                    ind_row = cur_fila.fetchone()
                                     if ind_row:
                                         industria_id = int(ind_row[0])
                                     else:
-                                        cur_carga.execute(f"""
+                                        cur_fila.execute(f"""
                                             INSERT INTO {DB}.CORE.DIM_INDUSTRIAS (INDUSTRIA_NOMBRE)
                                             VALUES (%s)
                                         """, (industria,))
-                                        cur_carga.execute(f"SELECT MAX(INDUSTRIA_ID) FROM {DB}.CORE.DIM_INDUSTRIAS")
-                                        industria_id = int(cur_carga.fetchone()[0])
+                                        cur_fila.execute(f"SELECT MAX(INDUSTRIA_ID) FROM {DB}.CORE.DIM_INDUSTRIAS")
+                                        industria_id = int(cur_fila.fetchone()[0])
+
                                 if not industria_id:
-                                    # Auto-clasificar industria con Cortex AI usando empresa + email
-                                    # IMPORTANTE: Usar cursor separado para Cortex AI para no
-                                    # interferir con el cursor principal de carga (cur_carga)
+                                    # Auto-clasificar con Cortex AI en conexión SEPARADA
                                     _dominio = email.split("@")[1] if email and "@" in email else ""
                                     _prompt_ind = (
                                         "Classify the following company into exactly ONE of these industries. "
@@ -1835,43 +1851,44 @@ with tab_cargar:
                                         f"Email domain: {_dominio}\n\n"
                                         "Industry:"
                                     )
-                                    cur_ai = conn_carga.cursor()
+                                    conn_ai = get_connection()
+                                    cur_ai = conn_ai.cursor()
                                     try:
                                         cur_ai.execute(
                                             "SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.1-8b', %s)",
                                             (_prompt_ind,)
                                         )
                                         _ai_ind = cur_ai.fetchone()[0].strip().strip('"').strip("'").strip()
-                                        cur_ai.execute(f"""
+                                        # Buscar match en la conexión de datos (no en la de AI)
+                                        cur_fila.execute(f"""
                                             SELECT INDUSTRIA_ID FROM {DB}.CORE.DIM_INDUSTRIAS
                                             WHERE UPPER(TRIM(INDUSTRIA_NOMBRE)) = %s
                                         """, (_ai_ind.upper(),))
-                                        _ai_row = cur_ai.fetchone()
+                                        _ai_row = cur_fila.fetchone()
                                         if _ai_row:
                                             industria_id = int(_ai_row[0])
                                     except Exception:
-                                        pass  # Si falla Cortex, cae al fallback abajo
+                                        pass  # Si falla Cortex AI, usa fallback
                                     finally:
                                         cur_ai.close()
+                                        conn_ai.close()
 
                                     if not industria_id:
-                                        # Fallback: "Sin Clasificar"
-                                        cur_carga.execute(f"SELECT MIN(INDUSTRIA_ID) FROM {DB}.CORE.DIM_INDUSTRIAS")
-                                        industria_id = int(cur_carga.fetchone()[0])
+                                        industria_id = _fallback_ind_id
 
                                 # Crear cuenta nueva
-                                cur_carga.execute(f"""
+                                cur_fila.execute(f"""
                                     INSERT INTO {DB}.CORE.DIM_CUENTAS (ACCT_NAME, INDUSTRIA_ID, EVENTO_ID, FUENTE_LEAD)
                                     VALUES (%s, %s, %s, %s)
                                 """, (empresa, industria_id, evento_id_carga, f"EVENTO_{evento_id_carga}"))
-                                cur_carga.execute(f"SELECT MAX(CUENTA_ID) FROM {DB}.CORE.DIM_CUENTAS")
-                                cuenta_id = int(cur_carga.fetchone()[0])
+                                cur_fila.execute(f"SELECT MAX(CUENTA_ID) FROM {DB}.CORE.DIM_CUENTAS")
+                                cuenta_id = int(cur_fila.fetchone()[0])
                                 cuentas_nuevas += 1
 
                             # Agregar contacto si tiene al menos nombre o email
                             if nombre or email:
                                 nombre_completo = f"{nombre} {apellidos}".strip() if nombre else ""
-                                cur_carga.execute(f"""
+                                cur_fila.execute(f"""
                                     INSERT INTO {DB}.CORE.DIM_CONTACTOS
                                     (CUENTA_ID, PRIMER_NOMBRE, APELLIDO, NOMBRE_COMPLETO, CARGO, EMAIL, WHATSAPP, FUENTE, ES_PRINCIPAL)
                                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -1881,13 +1898,13 @@ with tab_cargar:
                                       f"EVENTO_{evento_id_carga}", True))
                                 contactos_agregados += 1
 
-                        conn_carga.commit()
-                    except Exception as e:
-                        st.error(f"Error durante la carga: {e}")
-                        errores += 1
-                    finally:
-                        cur_carga.close()
-                        conn_carga.close()
+                            conn_fila.commit()
+                        except Exception as e:
+                            detalle_errores.append(f"Fila {idx+1} ({empresa}): {e}")
+                            errores += 1
+                        finally:
+                            cur_fila.close()
+                            conn_fila.close()
 
                     progress_carga.empty()
                     st.cache_data.clear()
@@ -1896,6 +1913,10 @@ with tab_cargar:
                         f"{contactos_agregados} contactos agregados, "
                         f"{errores} filas con error."
                     )
+                    if detalle_errores:
+                        with st.expander(f"Ver {len(detalle_errores)} errores"):
+                            for _err in detalle_errores:
+                                st.text(_err)
                     if cuentas_nuevas > 0 or contactos_agregados > 0:
                         st.rerun()
 
