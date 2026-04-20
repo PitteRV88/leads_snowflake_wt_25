@@ -553,7 +553,8 @@ def mostrar_tarjeta_cuenta(acct_name):
         "Editar Datos Cuenta",
         "Registrar Interacción",
         "Generar Pitch con IA",
-        "Descalificar Lead"
+        "Descalificar Lead",
+        "Fusionar con otra cuenta"
     ], key=f"action_{cuenta_id}")
 
     # Limpiar pitch persistido si el usuario cambia de accion
@@ -986,6 +987,139 @@ def mostrar_tarjeta_cuenta(acct_name):
                         st.session_state.pop("_kpi_filter", None)
                         st.session_state.pop("_kpi_filter_prev", None)
                         st.rerun()
+
+    # ---- FUSIONAR CON OTRA CUENTA ----
+    elif action == "Fusionar con otra cuenta":
+        st.caption(f"Cuenta actual: **{acct_name}** (esta cuenta absorberá a la seleccionada)")
+        st.warning("Esta acción moverá todos los contactos e interacciones de la cuenta seleccionada a esta cuenta, y luego eliminará la cuenta seleccionada. **No se puede deshacer.**")
+
+        # Lista de cuentas disponibles para fusionar (excluir la actual)
+        otras_cuentas = sorted(df["ACCT_NAME"].unique())
+        otras_cuentas = [c for c in otras_cuentas if c != acct_name]
+
+        cuenta_absorber = st.selectbox(
+            "Selecciona la cuenta a absorber:",
+            ["(Seleccionar)"] + otras_cuentas,
+            key=f"merge_sel_{cuenta_id}"
+        )
+
+        if cuenta_absorber and cuenta_absorber != "(Seleccionar)":
+            # Obtener datos de la cuenta a absorber
+            row_abs = df[df["ACCT_NAME"] == cuenta_absorber]
+            if not row_abs.empty:
+                row_abs = row_abs.iloc[0]
+                abs_cuenta_id = int(row_abs["CUENTA_ID"])
+
+                # Preview lado a lado
+                st.markdown("---")
+                st.markdown("**Comparación de datos:**")
+                col_princ, col_absor = st.columns(2)
+                with col_princ:
+                    st.markdown(f"**{acct_name}** (principal)")
+                    st.text(f"Industria: {row['INDUSTRIA_NOMBRE']}")
+                    st.text(f"Tamaño: {row['TAMANO_EMPRESA'] or 'N/A'}")
+                    st.text(f"Web: {row['SITIO_WEB'] or 'N/A'}")
+                    st.text(f"Ubicación: {row['UBICACION'] or 'N/A'}")
+                    st.text(f"LinkedIn: {row['LINKEDIN_EMPRESA'] or 'N/A'}")
+                    st.text(f"Estatus: {row['ESTATUS']}")
+                    st.text(f"Contactos: {row['NUM_CONTACTOS']}")
+                    st.text(f"Interacciones: {row['NUM_INTERACCIONES']}")
+                with col_absor:
+                    st.markdown(f"**{cuenta_absorber}** (será eliminada)")
+                    st.text(f"Industria: {row_abs['INDUSTRIA_NOMBRE']}")
+                    st.text(f"Tamaño: {row_abs['TAMANO_EMPRESA'] or 'N/A'}")
+                    st.text(f"Web: {row_abs['SITIO_WEB'] or 'N/A'}")
+                    st.text(f"Ubicación: {row_abs['UBICACION'] or 'N/A'}")
+                    st.text(f"LinkedIn: {row_abs['LINKEDIN_EMPRESA'] or 'N/A'}")
+                    st.text(f"Estatus: {row_abs['ESTATUS']}")
+                    st.text(f"Contactos: {row_abs['NUM_CONTACTOS']}")
+                    st.text(f"Interacciones: {row_abs['NUM_INTERACCIONES']}")
+
+                st.info(f"Se moverán **{int(row_abs['NUM_CONTACTOS'])}** contactos y **{int(row_abs['NUM_INTERACCIONES'])}** interacciones de **{cuenta_absorber}** a **{acct_name}**. Los campos vacíos de la cuenta principal se completarán con los datos de la cuenta absorbida.")
+
+                confirm_merge = st.text_input(
+                    "Escribe FUSIONAR para confirmar:",
+                    key=f"merge_confirm_{cuenta_id}",
+                    placeholder="FUSIONAR"
+                )
+                if st.button("Ejecutar fusión", key=f"merge_btn_{cuenta_id}", type="primary"):
+                    if confirm_merge != "FUSIONAR":
+                        st.error("Escribe FUSIONAR (en mayúsculas) para confirmar.")
+                    else:
+                        conn_merge = get_connection()
+                        cur_merge = conn_merge.cursor()
+                        try:
+                            # 1. Mover contactos
+                            cur_merge.execute(f"""
+                                UPDATE {DB}.CORE.DIM_CONTACTOS
+                                SET CUENTA_ID = %s
+                                WHERE CUENTA_ID = %s
+                            """, (cuenta_id, abs_cuenta_id))
+                            n_contactos_movidos = cur_merge.rowcount
+
+                            # 2. Mover interacciones
+                            cur_merge.execute(f"""
+                                UPDATE {DB}.CORE.FACT_INTERACCIONES
+                                SET CUENTA_ID = %s
+                                WHERE CUENTA_ID = %s
+                            """, (cuenta_id, abs_cuenta_id))
+                            n_inter_movidas = cur_merge.rowcount
+
+                            # 3. Completar campos vacíos de la cuenta principal
+                            campos_coalesce = [
+                                "SITIO_WEB", "UBICACION", "PAIS", "ESTADO", "CIUDAD",
+                                "LINKEDIN_EMPRESA", "REVENUE_ESTIMADO_USD",
+                                "NUM_EMPLEADOS_ESTIMADO", "TAMANO_EMPRESA",
+                                "INDUSTRIA_DETALLE", "NOTAS"
+                            ]
+                            sets_coalesce = ", ".join(
+                                f"{c} = COALESCE(dest.{c}, src.{c})" for c in campos_coalesce
+                            )
+                            cur_merge.execute(f"""
+                                UPDATE {DB}.CORE.DIM_CUENTAS dest
+                                SET {sets_coalesce},
+                                    UPDATED_AT = CURRENT_TIMESTAMP()
+                                FROM {DB}.CORE.DIM_CUENTAS src
+                                WHERE dest.CUENTA_ID = %s AND src.CUENTA_ID = %s
+                            """, (cuenta_id, abs_cuenta_id))
+
+                            # 4. Si la principal tiene industria "Sin Clasificar" y la absorbida tiene otra, usar la de la absorbida
+                            cur_merge.execute(f"""
+                                UPDATE {DB}.CORE.DIM_CUENTAS
+                                SET INDUSTRIA_ID = %s
+                                WHERE CUENTA_ID = %s
+                                  AND INDUSTRIA_ID = (
+                                      SELECT INDUSTRIA_ID FROM {DB}.CORE.DIM_INDUSTRIAS
+                                      WHERE UPPER(TRIM(INDUSTRIA_NOMBRE)) = 'SIN CLASIFICAR'
+                                  )
+                                  AND %s IS NOT NULL
+                                  AND %s != (
+                                      SELECT INDUSTRIA_ID FROM {DB}.CORE.DIM_INDUSTRIAS
+                                      WHERE UPPER(TRIM(INDUSTRIA_NOMBRE)) = 'SIN CLASIFICAR'
+                                  )
+                            """, (int(row_abs["INDUSTRIA_ID"]), cuenta_id,
+                                  int(row_abs["INDUSTRIA_ID"]), int(row_abs["INDUSTRIA_ID"])))
+
+                            # 5. Eliminar cuenta absorbida
+                            cur_merge.execute(f"""
+                                DELETE FROM {DB}.CORE.DIM_CUENTAS
+                                WHERE CUENTA_ID = %s
+                            """, (abs_cuenta_id,))
+
+                            conn_merge.commit()
+                            st.success(f"Fusión completada: {n_contactos_movidos} contactos y {n_inter_movidas} interacciones movidos de **{cuenta_absorber}** a **{acct_name}**. Cuenta **{cuenta_absorber}** eliminada.")
+                            st.cache_data.clear()
+                            st.session_state["_open_cuenta"] = acct_name
+                            st.session_state["_toast_msg"] = f"Cuenta {cuenta_absorber} fusionada en {acct_name}."
+                            st.session_state.pop("_kpi_filter", None)
+                            st.session_state.pop("_kpi_filter_prev", None)
+                            st.rerun()
+                        except Exception as e:
+                            conn_merge.rollback()
+                            st.error(f"Error al fusionar: {e}")
+                        finally:
+                            cur_merge.close()
+                            conn_merge.close()
 
 
 # =============================================================
