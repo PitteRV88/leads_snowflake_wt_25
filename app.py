@@ -8,6 +8,7 @@
 # Proyecto: Leads Snowflake WT25 - EGOS BI
 # =============================================================
 
+import json
 import os
 import re
 import urllib.parse
@@ -1031,143 +1032,220 @@ with st.sidebar:
     # --- Herramientas de enriquecimiento ---
     st.divider()
     st.subheader("Herramientas")
-    if st.button("Enriquecer sitios web", help="Busca sitios web para cuentas sin URL usando el dominio del email"):
-        # Obtener cuentas sin sitio web con email corporativo
+    if st.button("Enriquecer datos con IA", help="Usa Cortex AI para completar industria, sitio web, tamaño, empleados, revenue, ubicación y LinkedIn de cuentas con datos faltantes"):
         conn_enr = get_connection()
         cur_enr = conn_enr.cursor()
         try:
-            cur_enr.execute(f"""
-                SELECT c.CUENTA_ID, c.ACCT_NAME, co.EMAIL
-                FROM {DB}.CORE.DIM_CUENTAS c
-                LEFT JOIN {DB}.CORE.DIM_CONTACTOS co
-                    ON c.CUENTA_ID = co.CUENTA_ID AND co.ES_PRINCIPAL = TRUE
-                WHERE c.SITIO_WEB IS NULL OR TRIM(c.SITIO_WEB) = '' OR c.SITIO_WEB = 'nan'
-            """)
-            cuentas_sin_web = cur_enr.fetchall()
-        finally:
-            cur_enr.close()
-            conn_enr.close()
-
-        if not cuentas_sin_web:
-            st.success("Todas las cuentas ya tienen sitio web registrado.")
-        else:
-            encontrados = 0
-            omitidos_generico = 0
-            fallidos = 0
-            progress = st.progress(0, text="Buscando sitios web...")
-            for i, (cid, nombre, email) in enumerate(cuentas_sin_web):
-                progress.progress((i + 1) / len(cuentas_sin_web),
-                                  text=f"Verificando {nombre}...")
-                if not email or not str(email).strip() or "@" not in str(email):
-                    fallidos += 1
-                    continue
-                dominio = str(email).strip().split("@")[1]
-                url = inferir_sitio_web(dominio)
-                if url == "":
-                    # Verificar si fue por dominio generico
-                    d = dominio.lower()
-                    gens = {"gmail.com", "hotmail.com", "outlook.com", "yahoo.com",
-                            "live.com", "icloud.com", "protonmail.com", "aol.com",
-                            "live.com.mx", "hotmail.es", "outlook.es", "yahoo.com.mx"}
-                    if d in gens:
-                        omitidos_generico += 1
-                    else:
-                        fallidos += 1
-                else:
-                    actualizar_cuenta(cid, {"SITIO_WEB": url})
-                    encontrados += 1
-            progress.empty()
-            st.cache_data.clear()
-            st.success(
-                f"Listo: {encontrados} sitios encontrados, "
-                f"{omitidos_generico} con email generico (omitidos), "
-                f"{fallidos} no encontrados."
-            )
-            if encontrados > 0:
-                st.rerun()
-
-    if st.button("Clasificar industrias con IA", help="Usa Cortex AI para asignar industria a cuentas marcadas como 'Sin Clasificar'"):
-        conn_ind = get_connection()
-        cur_ind = conn_ind.cursor()
-        try:
             # Obtener ID de "Sin Clasificar"
-            cur_ind.execute(f"""
+            cur_enr.execute(f"""
                 SELECT INDUSTRIA_ID FROM {DB}.CORE.DIM_INDUSTRIAS
                 WHERE UPPER(TRIM(INDUSTRIA_NOMBRE)) = 'SIN CLASIFICAR'
             """)
-            sin_clas_row = cur_ind.fetchone()
-            sin_clas_id = int(sin_clas_row[0]) if sin_clas_row else 1
+            _sc_row = cur_enr.fetchone()
+            sin_clas_id = int(_sc_row[0]) if _sc_row else 1
 
-            # Obtener lista de industrias válidas (excluir Sin Clasificar)
-            cur_ind.execute(f"""
+            # Industrias válidas para el prompt
+            cur_enr.execute(f"""
                 SELECT INDUSTRIA_ID, INDUSTRIA_NOMBRE FROM {DB}.CORE.DIM_INDUSTRIAS
                 WHERE INDUSTRIA_ID != %s ORDER BY INDUSTRIA_ID
             """, (sin_clas_id,))
-            industrias_validas = cur_ind.fetchall()
-            lista_industrias = ", ".join([nombre for _, nombre in industrias_validas])
+            industrias_validas = cur_enr.fetchall()
+            lista_industrias = ", ".join([n for _, n in industrias_validas])
 
-            # Obtener cuentas "Sin Clasificar"
-            cur_ind.execute(f"""
-                SELECT c.CUENTA_ID, c.ACCT_NAME, co.EMAIL
+            # Cuentas con al menos un campo vacío
+            cur_enr.execute(f"""
+                SELECT c.CUENTA_ID, c.ACCT_NAME, co.EMAIL,
+                       c.INDUSTRIA_ID, c.SITIO_WEB, c.TAMANO_EMPRESA,
+                       c.NUM_EMPLEADOS_ESTIMADO, c.REVENUE_ESTIMADO_USD,
+                       c.UBICACION, c.PAIS, c.ESTADO, c.CIUDAD,
+                       c.LINKEDIN_EMPRESA
                 FROM {DB}.CORE.DIM_CUENTAS c
                 LEFT JOIN {DB}.CORE.DIM_CONTACTOS co
                     ON c.CUENTA_ID = co.CUENTA_ID AND co.ES_PRINCIPAL = TRUE
                 WHERE c.INDUSTRIA_ID = %s
+                   OR c.SITIO_WEB IS NULL OR TRIM(c.SITIO_WEB) = '' OR c.SITIO_WEB = 'nan'
+                   OR c.TAMANO_EMPRESA IS NULL OR TRIM(c.TAMANO_EMPRESA) = ''
+                   OR c.NUM_EMPLEADOS_ESTIMADO IS NULL
+                   OR c.REVENUE_ESTIMADO_USD IS NULL
+                   OR c.UBICACION IS NULL OR TRIM(c.UBICACION) = ''
+                   OR c.LINKEDIN_EMPRESA IS NULL OR TRIM(c.LINKEDIN_EMPRESA) = ''
             """, (sin_clas_id,))
-            cuentas_sin_ind = cur_ind.fetchall()
-
-            if not cuentas_sin_ind:
-                st.success("Todas las cuentas ya tienen industria asignada.")
-            else:
-                clasificadas = 0
-                no_clasificadas = 0
-                progress_ind = st.progress(0, text="Clasificando industrias con IA...")
-                for i, (cid, nombre_emp, email_cta) in enumerate(cuentas_sin_ind):
-                    progress_ind.progress((i + 1) / len(cuentas_sin_ind),
-                                          text=f"Clasificando {nombre_emp}...")
-                    dominio = ""
-                    if email_cta and "@" in str(email_cta):
-                        dominio = str(email_cta).strip().split("@")[1]
-
-                    prompt_cls = (
-                        "Classify the following company into exactly ONE of these industries. "
-                        "Reply with ONLY the industry name, nothing else.\n\n"
-                        f"Industries: {lista_industrias}\n\n"
-                        f"Company: {nombre_emp}\n"
-                        f"Email domain: {dominio}\n\n"
-                        "Industry:"
-                    )
-                    try:
-                        cur_ind.execute(
-                            "SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.1-8b', %s)",
-                            (prompt_cls,)
-                        )
-                        ai_resultado = cur_ind.fetchone()[0].strip().strip('"').strip("'").strip()
-                        # Buscar match en industrias válidas
-                        matched_id = None
-                        for ind_id, ind_nombre in industrias_validas:
-                            if ai_resultado.upper() == ind_nombre.upper():
-                                matched_id = int(ind_id)
-                                break
-                        if matched_id:
-                            actualizar_cuenta(cid, {"INDUSTRIA_ID": matched_id})
-                            clasificadas += 1
-                        else:
-                            no_clasificadas += 1
-                    except Exception:
-                        no_clasificadas += 1
-
-                progress_ind.empty()
-                st.cache_data.clear()
-                st.success(
-                    f"Listo: {clasificadas} industrias clasificadas, "
-                    f"{no_clasificadas} no se pudieron clasificar."
-                )
-                if clasificadas > 0:
-                    st.rerun()
+            cuentas = cur_enr.fetchall()
         finally:
-            cur_ind.close()
-            conn_ind.close()
+            cur_enr.close()
+            conn_enr.close()
+
+        if not cuentas:
+            st.success("Todas las cuentas ya tienen datos completos.")
+        else:
+            enriquecidas = 0
+            sin_cambio = 0
+            progress_enr = st.progress(0, text="Enriqueciendo datos con IA...")
+
+            for i, row_enr in enumerate(cuentas):
+                (cid, nombre_emp, email_cta, ind_id_actual, web_actual,
+                 tamano_actual, empleados_actual, revenue_actual,
+                 ubic_actual, pais_actual, estado_actual, ciudad_actual,
+                 linkedin_actual) = row_enr
+
+                progress_enr.progress(
+                    (i + 1) / len(cuentas),
+                    text=f"Enriqueciendo {nombre_emp} ({i+1}/{len(cuentas)})..."
+                )
+
+                dominio = ""
+                if email_cta and "@" in str(email_cta):
+                    dominio = str(email_cta).strip().split("@")[1]
+
+                # Determinar qué campos faltan
+                falta_industria = (ind_id_actual == sin_clas_id)
+                falta_web = not web_actual or str(web_actual).strip() in ("", "nan")
+                falta_tamano = not tamano_actual or str(tamano_actual).strip() == ""
+                falta_empleados = empleados_actual is None
+                falta_revenue = revenue_actual is None
+                falta_ubicacion = not ubic_actual or str(ubic_actual).strip() == ""
+                falta_linkedin = not linkedin_actual or str(linkedin_actual).strip() == ""
+
+                if not any([falta_industria, falta_web, falta_tamano,
+                            falta_empleados, falta_revenue, falta_ubicacion,
+                            falta_linkedin]):
+                    sin_cambio += 1
+                    continue
+
+                # Prompt consolidado a Cortex AI
+                prompt_enr = (
+                    "Given a company name and email domain, provide company information "
+                    "in JSON format. Reply with ONLY valid JSON, no explanation or markdown.\n\n"
+                    f"Company: {nombre_emp}\n"
+                    f"Email domain: {dominio}\n\n"
+                    "Return this exact JSON structure (use null if unknown):\n"
+                    "{\n"
+                    f'  "industry": "one of: {lista_industrias}",\n'
+                    '  "website": "https://...",\n'
+                    '  "linkedin_url": "https://linkedin.com/company/...",\n'
+                    '  "country": "country name",\n'
+                    '  "state": "state or province",\n'
+                    '  "city": "city name",\n'
+                    '  "employees_estimate": 0,\n'
+                    '  "revenue_usd_estimate": 0,\n'
+                    '  "company_size": "one of: Micro, Pequeña, Mediana, Grande, Enterprise"\n'
+                    "}"
+                )
+
+                campos_update = {}
+                conn_ai = get_connection()
+                cur_ai = conn_ai.cursor()
+                try:
+                    cur_ai.execute(
+                        "SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.1-8b', %s)",
+                        (prompt_enr,)
+                    )
+                    ai_raw = cur_ai.fetchone()[0].strip()
+                    # Extraer JSON del response (puede venir envuelto en markdown)
+                    _json_match = re.search(r'\{[^{}]*\}', ai_raw, re.DOTALL)
+                    if _json_match:
+                        ai_data = json.loads(_json_match.group())
+                    else:
+                        ai_data = {}
+                except Exception:
+                    ai_data = {}
+                finally:
+                    cur_ai.close()
+                    conn_ai.close()
+
+                # Industria
+                if falta_industria and ai_data.get("industry"):
+                    _ai_ind = str(ai_data["industry"]).strip()
+                    for ind_id, ind_nombre in industrias_validas:
+                        if _ai_ind.upper() == ind_nombre.upper():
+                            campos_update["INDUSTRIA_ID"] = int(ind_id)
+                            campos_update["FUENTE_CLASIFICACION"] = "CORTEX_AI"
+                            break
+
+                # Sitio web: primero AI, luego fallback HTTP HEAD
+                if falta_web:
+                    _ai_web = str(ai_data.get("website") or "").strip()
+                    if _ai_web and _ai_web.startswith("http"):
+                        campos_update["SITIO_WEB"] = _ai_web
+                    elif dominio:
+                        _fb_url = inferir_sitio_web(dominio)
+                        if _fb_url:
+                            campos_update["SITIO_WEB"] = _fb_url
+
+                # LinkedIn
+                if falta_linkedin and ai_data.get("linkedin_url"):
+                    _ai_li = str(ai_data["linkedin_url"]).strip()
+                    if "linkedin.com" in _ai_li.lower():
+                        campos_update["LINKEDIN_EMPRESA"] = _ai_li
+
+                # Ubicación (país, estado, ciudad)
+                if falta_ubicacion:
+                    _pais = str(ai_data.get("country") or "").strip()
+                    _estado = str(ai_data.get("state") or "").strip()
+                    _ciudad = str(ai_data.get("city") or "").strip()
+                    partes_ubic = [p for p in [_ciudad, _estado, _pais] if p and p.lower() != "null"]
+                    if partes_ubic:
+                        campos_update["UBICACION"] = ", ".join(partes_ubic)
+                    if _pais and _pais.lower() != "null":
+                        campos_update["PAIS"] = _pais
+                    if _estado and _estado.lower() != "null":
+                        campos_update["ESTADO"] = _estado
+                    if _ciudad and _ciudad.lower() != "null":
+                        campos_update["CIUDAD"] = _ciudad
+
+                # Empleados estimados
+                if falta_empleados and ai_data.get("employees_estimate"):
+                    try:
+                        _emp = int(ai_data["employees_estimate"])
+                        if _emp > 0:
+                            campos_update["NUM_EMPLEADOS_ESTIMADO"] = _emp
+                    except (ValueError, TypeError):
+                        pass
+
+                # Revenue estimado
+                if falta_revenue and ai_data.get("revenue_usd_estimate"):
+                    try:
+                        _rev = float(ai_data["revenue_usd_estimate"])
+                        if _rev > 0:
+                            campos_update["REVENUE_ESTIMADO_USD"] = _rev
+                    except (ValueError, TypeError):
+                        pass
+
+                # Tamaño empresa: usar AI o derivar de empleados
+                if falta_tamano:
+                    _ai_tam = str(ai_data.get("company_size") or "").strip()
+                    tamanos_validos = {"Micro", "Pequeña", "Mediana", "Grande", "Enterprise"}
+                    if _ai_tam in tamanos_validos:
+                        campos_update["TAMANO_EMPRESA"] = _ai_tam
+                        campos_update["FUENTE_TAMANO"] = "CORTEX_AI"
+                    elif campos_update.get("NUM_EMPLEADOS_ESTIMADO") or (not falta_empleados and empleados_actual):
+                        _n = campos_update.get("NUM_EMPLEADOS_ESTIMADO") or empleados_actual
+                        if _n < 10:
+                            campos_update["TAMANO_EMPRESA"] = "Micro"
+                        elif _n <= 50:
+                            campos_update["TAMANO_EMPRESA"] = "Pequeña"
+                        elif _n <= 250:
+                            campos_update["TAMANO_EMPRESA"] = "Mediana"
+                        elif _n <= 1000:
+                            campos_update["TAMANO_EMPRESA"] = "Grande"
+                        else:
+                            campos_update["TAMANO_EMPRESA"] = "Enterprise"
+                        campos_update["FUENTE_TAMANO"] = "DERIVADO_EMPLEADOS"
+
+                if campos_update:
+                    actualizar_cuenta(cid, campos_update)
+                    enriquecidas += 1
+                else:
+                    sin_cambio += 1
+
+            progress_enr.empty()
+            st.cache_data.clear()
+            st.success(
+                f"Listo: {enriquecidas} cuentas enriquecidas, "
+                f"{sin_cambio} sin cambios necesarios."
+            )
+            if enriquecidas > 0:
+                st.rerun()
 
 # =============================================================
 # APLICAR FILTROS
@@ -1612,7 +1690,7 @@ with tab_cargar:
 
     if uploaded is not None:
         df_csv = None
-        for _enc in ("utf-8", "latin-1", "cp1252"):
+        for _enc in ("utf-8", "cp1252", "latin-1"):
             try:
                 uploaded.seek(0)
                 df_csv = pd.read_csv(uploaded, encoding=_enc)
