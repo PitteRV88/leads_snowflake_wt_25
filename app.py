@@ -1835,46 +1835,10 @@ with tab_cargar:
                                         industria_id = int(cur_fila.fetchone()[0])
 
                                 if not industria_id:
-                                    # Auto-clasificar con Cortex AI en conexión SEPARADA
-                                    _dominio = email.split("@")[1] if email and "@" in email else ""
-                                    _prompt_ind = (
-                                        "Classify the following company into exactly ONE of these industries. "
-                                        "Reply with ONLY the industry name, nothing else.\n\n"
-                                        "Industries: Technology, Fintech/Financial Services, "
-                                        "Retail/Consumer Goods, Manufacturing/Industrial, "
-                                        "Telecommunications, Consulting/Professional Services, "
-                                        "Food & Beverage, Education/Research, Automotive, "
-                                        "Media/Entertainment, E-commerce, Energy, "
-                                        "Government/Public Sector, Healthcare/Pharma, "
-                                        "Logistics/Transportation, Insurance\n\n"
-                                        f"Company: {empresa}\n"
-                                        f"Email domain: {_dominio}\n\n"
-                                        "Industry:"
-                                    )
-                                    conn_ai = get_connection()
-                                    cur_ai = conn_ai.cursor()
-                                    try:
-                                        cur_ai.execute(
-                                            "SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.1-8b', %s)",
-                                            (_prompt_ind,)
-                                        )
-                                        _ai_ind = cur_ai.fetchone()[0].strip().strip('"').strip("'").strip()
-                                        # Buscar match en la conexión de datos (no en la de AI)
-                                        cur_fila.execute(f"""
-                                            SELECT INDUSTRIA_ID FROM {DB}.CORE.DIM_INDUSTRIAS
-                                            WHERE UPPER(TRIM(INDUSTRIA_NOMBRE)) = %s
-                                        """, (_ai_ind.upper(),))
-                                        _ai_row = cur_fila.fetchone()
-                                        if _ai_row:
-                                            industria_id = int(_ai_row[0])
-                                    except Exception:
-                                        pass  # Si falla Cortex AI, usa fallback
-                                    finally:
-                                        cur_ai.close()
-                                        conn_ai.close()
-
-                                    if not industria_id:
-                                        industria_id = _fallback_ind_id
+                                    # Usar "Sin Clasificar" como default.
+                                    # La clasificación se hace después con el botón
+                                    # "Enriquecer datos con IA" del sidebar.
+                                    industria_id = _fallback_ind_id
 
                                 # Crear cuenta nueva
                                 cur_fila.execute(f"""
