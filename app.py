@@ -1084,6 +1084,89 @@ with st.sidebar:
             if encontrados > 0:
                 st.rerun()
 
+    if st.button("Clasificar industrias con IA", help="Usa Cortex AI para asignar industria a cuentas marcadas como 'Sin Clasificar'"):
+        conn_ind = get_connection()
+        cur_ind = conn_ind.cursor()
+        try:
+            # Obtener ID de "Sin Clasificar"
+            cur_ind.execute(f"""
+                SELECT INDUSTRIA_ID FROM {DB}.CORE.DIM_INDUSTRIAS
+                WHERE UPPER(TRIM(INDUSTRIA_NOMBRE)) = 'SIN CLASIFICAR'
+            """)
+            sin_clas_row = cur_ind.fetchone()
+            sin_clas_id = int(sin_clas_row[0]) if sin_clas_row else 1
+
+            # Obtener lista de industrias válidas (excluir Sin Clasificar)
+            cur_ind.execute(f"""
+                SELECT INDUSTRIA_ID, INDUSTRIA_NOMBRE FROM {DB}.CORE.DIM_INDUSTRIAS
+                WHERE INDUSTRIA_ID != %s ORDER BY INDUSTRIA_ID
+            """, (sin_clas_id,))
+            industrias_validas = cur_ind.fetchall()
+            lista_industrias = ", ".join([nombre for _, nombre in industrias_validas])
+
+            # Obtener cuentas "Sin Clasificar"
+            cur_ind.execute(f"""
+                SELECT c.CUENTA_ID, c.ACCT_NAME, co.EMAIL
+                FROM {DB}.CORE.DIM_CUENTAS c
+                LEFT JOIN {DB}.CORE.DIM_CONTACTOS co
+                    ON c.CUENTA_ID = co.CUENTA_ID AND co.ES_PRINCIPAL = TRUE
+                WHERE c.INDUSTRIA_ID = %s
+            """, (sin_clas_id,))
+            cuentas_sin_ind = cur_ind.fetchall()
+
+            if not cuentas_sin_ind:
+                st.success("Todas las cuentas ya tienen industria asignada.")
+            else:
+                clasificadas = 0
+                no_clasificadas = 0
+                progress_ind = st.progress(0, text="Clasificando industrias con IA...")
+                for i, (cid, nombre_emp, email_cta) in enumerate(cuentas_sin_ind):
+                    progress_ind.progress((i + 1) / len(cuentas_sin_ind),
+                                          text=f"Clasificando {nombre_emp}...")
+                    dominio = ""
+                    if email_cta and "@" in str(email_cta):
+                        dominio = str(email_cta).strip().split("@")[1]
+
+                    prompt_cls = (
+                        "Classify the following company into exactly ONE of these industries. "
+                        "Reply with ONLY the industry name, nothing else.\n\n"
+                        f"Industries: {lista_industrias}\n\n"
+                        f"Company: {nombre_emp}\n"
+                        f"Email domain: {dominio}\n\n"
+                        "Industry:"
+                    )
+                    try:
+                        cur_ind.execute(
+                            "SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.1-8b', %s)",
+                            (prompt_cls,)
+                        )
+                        ai_resultado = cur_ind.fetchone()[0].strip().strip('"').strip("'").strip()
+                        # Buscar match en industrias válidas
+                        matched_id = None
+                        for ind_id, ind_nombre in industrias_validas:
+                            if ai_resultado.upper() == ind_nombre.upper():
+                                matched_id = int(ind_id)
+                                break
+                        if matched_id:
+                            actualizar_cuenta(cid, {"INDUSTRIA_ID": matched_id})
+                            clasificadas += 1
+                        else:
+                            no_clasificadas += 1
+                    except Exception:
+                        no_clasificadas += 1
+
+                progress_ind.empty()
+                st.cache_data.clear()
+                st.success(
+                    f"Listo: {clasificadas} industrias clasificadas, "
+                    f"{no_clasificadas} no se pudieron clasificar."
+                )
+                if clasificadas > 0:
+                    st.rerun()
+        finally:
+            cur_ind.close()
+            conn_ind.close()
+
 # =============================================================
 # APLICAR FILTROS
 # =============================================================
@@ -1526,11 +1609,16 @@ with tab_cargar:
     uploaded = st.file_uploader("Sube tu archivo CSV:", type=["csv"], key="_csv_upload")
 
     if uploaded is not None:
-        try:
-            df_csv = pd.read_csv(uploaded)
-        except Exception as e:
-            st.error(f"Error al leer CSV: {e}")
-            df_csv = None
+        df_csv = None
+        for _enc in ("utf-8", "latin-1", "cp1252"):
+            try:
+                uploaded.seek(0)
+                df_csv = pd.read_csv(uploaded, encoding=_enc)
+                break
+            except (UnicodeDecodeError, Exception):
+                continue
+        if df_csv is None:
+            st.error("Error al leer CSV: no se pudo decodificar el archivo. Verifica que sea un CSV válido.")
 
         if df_csv is not None and not df_csv.empty:
             st.success(f"Archivo cargado: {len(df_csv)} filas, {len(df_csv.columns)} columnas")
@@ -1649,9 +1737,43 @@ with tab_cargar:
                                         cur_carga.execute(f"SELECT MAX(INDUSTRIA_ID) FROM {DB}.CORE.DIM_INDUSTRIAS")
                                         industria_id = int(cur_carga.fetchone()[0])
                                 if not industria_id:
-                                    # Asignar industria "Sin clasificar" o la primera disponible
-                                    cur_carga.execute(f"SELECT MIN(INDUSTRIA_ID) FROM {DB}.CORE.DIM_INDUSTRIAS")
-                                    industria_id = int(cur_carga.fetchone()[0])
+                                    # Auto-clasificar industria con Cortex AI usando empresa + email
+                                    _dominio = email.split("@")[1] if email and "@" in email else ""
+                                    _prompt_ind = (
+                                        "Classify the following company into exactly ONE of these industries. "
+                                        "Reply with ONLY the industry name, nothing else.\n\n"
+                                        "Industries: Technology, Fintech/Financial Services, "
+                                        "Retail/Consumer Goods, Manufacturing/Industrial, "
+                                        "Telecommunications, Consulting/Professional Services, "
+                                        "Food & Beverage, Education/Research, Automotive, "
+                                        "Media/Entertainment, E-commerce, Energy, "
+                                        "Government/Public Sector, Healthcare/Pharma, "
+                                        "Logistics/Transportation, Insurance\n\n"
+                                        f"Company: {empresa}\n"
+                                        f"Email domain: {_dominio}\n\n"
+                                        "Industry:"
+                                    )
+                                    try:
+                                        cur_carga.execute(
+                                            "SELECT SNOWFLAKE.CORTEX.COMPLETE('llama3.1-8b', %s)",
+                                            (_prompt_ind,)
+                                        )
+                                        _ai_ind = cur_carga.fetchone()[0].strip().strip('"').strip("'").strip()
+                                        # Buscar coincidencia en DIM_INDUSTRIAS
+                                        cur_carga.execute(f"""
+                                            SELECT INDUSTRIA_ID FROM {DB}.CORE.DIM_INDUSTRIAS
+                                            WHERE UPPER(TRIM(INDUSTRIA_NOMBRE)) = %s
+                                        """, (_ai_ind.upper(),))
+                                        _ai_row = cur_carga.fetchone()
+                                        if _ai_row:
+                                            industria_id = int(_ai_row[0])
+                                    except Exception:
+                                        pass  # Si falla Cortex, cae al fallback abajo
+
+                                    if not industria_id:
+                                        # Fallback: "Sin Clasificar"
+                                        cur_carga.execute(f"SELECT MIN(INDUSTRIA_ID) FROM {DB}.CORE.DIM_INDUSTRIAS")
+                                        industria_id = int(cur_carga.fetchone()[0])
 
                                 # Crear cuenta nueva
                                 cur_carga.execute(f"""
