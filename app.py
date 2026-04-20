@@ -487,28 +487,30 @@ def mostrar_tarjeta_cuenta(acct_name):
     st.markdown(f"### {acct_name}")
     dc1, dc2, dc3, dc4 = st.columns(4)
     dc1.metric("Industria", row["INDUSTRIA_NOMBRE"])
-    dc2.metric("Tamaño", row["TAMANO_EMPRESA"] or "N/A")
-    dc3.metric("Empleados Est.", f"{int(row['NUM_EMPLEADOS_ESTIMADO']):,}" if row["NUM_EMPLEADOS_ESTIMADO"] else "N/A")
-    dc4.metric("Revenue Est.", f"${float(row['REVENUE_ESTIMADO_USD'])/1e6:,.1f}M" if row["REVENUE_ESTIMADO_USD"] else "N/A")
+    dc2.metric("Tamaño", row["TAMANO_EMPRESA"] if pd.notna(row["TAMANO_EMPRESA"]) else "N/A")
+    dc3.metric("Empleados Est.", f"{int(row['NUM_EMPLEADOS_ESTIMADO']):,}" if pd.notna(row["NUM_EMPLEADOS_ESTIMADO"]) else "N/A")
+    dc4.metric("Revenue Est.", f"${float(row['REVENUE_ESTIMADO_USD'])/1e6:,.1f}M" if pd.notna(row["REVENUE_ESTIMADO_USD"]) else "N/A")
 
     dc5, dc6, dc7, dc8 = st.columns(4)
     dc5.metric("Estatus", row["ESTATUS"])
     if row["ESTATUS"] == "DESCALIFICADO" and row.get("MOTIVO_DESCALIFICACION"):
         st.warning(f"**Motivo de descalificación:** {row['MOTIVO_DESCALIFICACION']}")
-    dc6.markdown(f"**Ubicacion:** {row['UBICACION'] or 'N/A'}")
-    if row["SITIO_WEB"] and str(row["SITIO_WEB"]).strip():
+    dc6.markdown(f"**Ubicacion:** {row['UBICACION'] if pd.notna(row['UBICACION']) else 'N/A'}")
+    if pd.notna(row["SITIO_WEB"]) and str(row["SITIO_WEB"]).strip():
         dc7.markdown(f"**Web:** [{row['SITIO_WEB']}]({row['SITIO_WEB']})")
     else:
         dc7.markdown("**Web:** N/A")
-    if row["LINKEDIN_EMPRESA"] and str(row["LINKEDIN_EMPRESA"]).strip():
+    if pd.notna(row["LINKEDIN_EMPRESA"]) and str(row["LINKEDIN_EMPRESA"]).strip():
         dc8.markdown(f"**LinkedIn:** [Ver perfil]({row['LINKEDIN_EMPRESA']})")
     else:
         dc8.markdown("**LinkedIn:** N/A")
 
     # Email del contacto principal como mailto
-    if row["CONTACTO_EMAIL"] and str(row["CONTACTO_EMAIL"]).strip():
-        st.markdown(f"**Contacto principal:** {row['CONTACTO_NOMBRE'] or 'N/A'} ({row['CONTACTO_CARGO'] or 'N/A'}) - {email_link_md(row['CONTACTO_EMAIL'])}")
-    if row["NOTAS"] and str(row["NOTAS"]).strip():
+    if pd.notna(row["CONTACTO_EMAIL"]) and str(row["CONTACTO_EMAIL"]).strip():
+        _nombre = row['CONTACTO_NOMBRE'] if pd.notna(row['CONTACTO_NOMBRE']) else 'N/A'
+        _cargo = row['CONTACTO_CARGO'] if pd.notna(row['CONTACTO_CARGO']) else 'N/A'
+        st.markdown(f"**Contacto principal:** {_nombre} ({_cargo}) - {email_link_md(row['CONTACTO_EMAIL'])}")
+    if pd.notna(row["NOTAS"]) and str(row["NOTAS"]).strip():
         st.info(f"**Notas:** {row['NOTAS']}")
 
     # -- Contactos de la cuenta --
