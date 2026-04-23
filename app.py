@@ -685,8 +685,8 @@ def mostrar_tarjeta_cuenta(acct_name):
         nuevo_web = ew1.text_input("Sitio Web", value=row["SITIO_WEB"] or "", key=f"ed_web_{cuenta_id}")
         nuevo_linkedin = ew2.text_input("LinkedIn Empresa", value=row["LINKEDIN_EMPRESA"] or "", key=f"ed_lin_{cuenta_id}")
         en1, en2 = st.columns(2)
-        nuevo_empleados = en1.number_input("Empleados Est.", value=int(row["NUM_EMPLEADOS_ESTIMADO"]) if row["NUM_EMPLEADOS_ESTIMADO"] else 0, min_value=0, key=f"ed_emp_{cuenta_id}")
-        nuevo_revenue = en2.number_input("Revenue Est. (USD)", value=float(row["REVENUE_ESTIMADO_USD"]) if row["REVENUE_ESTIMADO_USD"] else 0.0, min_value=0.0, format="%.2f", key=f"ed_rev_{cuenta_id}")
+        nuevo_empleados = en1.number_input("Empleados Est.", value=int(row["NUM_EMPLEADOS_ESTIMADO"]) if pd.notna(row["NUM_EMPLEADOS_ESTIMADO"]) else 0, min_value=0, key=f"ed_emp_{cuenta_id}")
+        nuevo_revenue = en2.number_input("Revenue Est. (USD)", value=float(row["REVENUE_ESTIMADO_USD"]) if pd.notna(row["REVENUE_ESTIMADO_USD"]) else 0.0, min_value=0.0, format="%.2f", key=f"ed_rev_{cuenta_id}")
         nuevas_notas = st.text_area("Notas", value=row["NOTAS"] or "", key=f"ed_not_{cuenta_id}")
         if st.button("Guardar Cambios", key=f"ed_save_{cuenta_id}", type="primary"):
             if nuevo_estatus == "DESCALIFICADO" and not motivo_descal.strip():
@@ -752,9 +752,9 @@ def mostrar_tarjeta_cuenta(acct_name):
         contexto = f"Empresa: {row['ACCT_NAME']}\nIndustria: {row['INDUSTRIA_NOMBRE']}"
         if row["TAMANO_EMPRESA"]:
             contexto += f"\nTamano: {row['TAMANO_EMPRESA']}"
-        if row["NUM_EMPLEADOS_ESTIMADO"]:
+        if pd.notna(row["NUM_EMPLEADOS_ESTIMADO"]):
             contexto += f" (~{int(row['NUM_EMPLEADOS_ESTIMADO'])} empleados)"
-        if row["REVENUE_ESTIMADO_USD"]:
+        if pd.notna(row["REVENUE_ESTIMADO_USD"]):
             contexto += f"\nRevenue: ${float(row['REVENUE_ESTIMADO_USD'])/1e6:,.1f}M USD"
         if row["UBICACION"]:
             contexto += f"\nUbicacion: {row['UBICACION']}"
